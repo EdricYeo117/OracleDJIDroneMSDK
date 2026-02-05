@@ -494,4 +494,14 @@ More refer to the release notes." </string>
     <string name="item_app_silently_upgrade_description">Demonstrate APP Silently Upgrade functions</string>
     <string name="btn_silently_upgrade_package">Set Silently Upgrade Package</string>
     <string name="btn_install_test_app">Install Test App</string>
+
+    <!-- Strings for HTTP server -->
+    <string name="red_host_default">10.33.114.41</string>
+    <string name="red_port_default">1880</string>
+    <string name="red_upload_path_default">/upload</string>
+    <string name="red_scheme_default">http</string>
+
+    <!-- Optional full URL -->
+    <string name="red_upload_url_default">http://10.33.114.41:1880/upload</string>
+
 </resources>

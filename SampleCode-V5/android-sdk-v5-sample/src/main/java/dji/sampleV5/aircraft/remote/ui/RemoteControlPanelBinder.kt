@@ -24,10 +24,22 @@ class RemoteControlPanelBinder(
     private val tvIp: TextView = root.findViewById(R.id.tv_remote_ip)
     private val etUrl: EditText = root.findViewById(R.id.et_red_upload_url)
 
+    private fun defaultUploadUrl(): String {
+        val scheme = appContext.getString(dji.sampleV5.aircraft.R.string.red_scheme_default)
+        val host = appContext.getString(dji.sampleV5.aircraft.R.string.red_host_default)
+        val port = appContext.getString(dji.sampleV5.aircraft.R.string.red_port_default)
+        val path = appContext.getString(dji.sampleV5.aircraft.R.string.red_upload_path_default)
+        return "$scheme://$host:$port$path"
+    }
+
     fun bind() {
         // IP display
         val ip = NetworkInfo.getLocalIpv4() ?: "Unknown"
         tvIp.text = "IP: $ip, Port: ${RemoteCommandService.DEFAULT_PORT}"
+
+        if (etUrl.text.isNullOrBlank()) {
+            etUrl.setText(defaultUploadUrl())
+        }
 
         // Start/Stop
         root.findViewById<Button>(R.id.btn_remote_start).setOnClickListener {
