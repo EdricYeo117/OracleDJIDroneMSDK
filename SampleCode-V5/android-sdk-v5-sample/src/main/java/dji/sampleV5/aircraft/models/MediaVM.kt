@@ -3,6 +3,7 @@ package dji.sampleV5.aircraft.models
 import androidx.lifecycle.MutableLiveData
 import dji.sampleV5.aircraft.R
 import dji.sampleV5.aircraft.data.DJIToastResult
+import dji.sampleV5.aircraft.remote.RedUploader
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.key.KeyTools.createKey
@@ -30,6 +31,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.ArrayList
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+
 
 /**
  * @author feel.feng
@@ -259,5 +266,184 @@ class MediaVM : DJIViewModel() {
             }
 
         })
+    }
+    // New function to: take photo -> download newest -> upload to RED
+    /**
+     * Take a photo, download the newest photo file to /mediafile, then upload it to RED.
+     *
+     * @param redUploadUrl example: "http://<UBUNTU_IP>:1880/upload"
+     * @param callback returns success/failure with DJI error description
+     */
+    fun takePhotoThenDownloadThenUpload(
+        redUploadUrl: String,
+        callback: CommonCallbacks.CompletionCallback
+    ) {
+        // Step 1: take photo
+        takePhoto(object : CommonCallbacks.CompletionCallback {
+            override fun onSuccess() {
+                // Step 2: after capture, refresh file list and locate newest
+                CoroutineScope(Dispatchers.Main).launch {
+                    try {
+                        val newest = waitForNewestMediaFileOrNull(timeoutMs = 12_000L)
+                        if (newest == null) {
+                            CallbackUtils.onFailure(
+                                callback,
+                                DJICommonError.FACTORY.build(DJICommonError.UNKNOWN)
+                            )
+                            return@launch
+                        }
+
+                        // Step 3: download newest file (async callback)
+                        downloadFileWithCallback(newest,
+                            onSuccess = { downloadedFile ->
+                                // Step 4: upload to RED off main thread
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    val (ok, errMsg) = try {
+                                        RedUploader.uploadFile(redUploadUrl, downloadedFile)
+                                    } catch (t: Throwable) {
+                                        false to (t.message ?: "upload exception")
+                                    }
+
+                                    withContext(Dispatchers.Main) {
+                                        if (ok) {
+                                            CallbackUtils.onSuccess(callback)
+                                        } else {
+                                            CallbackUtils.onFailure(
+                                                callback,
+                                                DJICommonError.FACTORY.build(DJICommonError.UNKNOWN)
+                                            )
+                                            // If you want better error propagation, also toast/log errMsg:
+                                            LogUtils.e(logTag, "Upload failed: $errMsg")
+                                        }
+                                    }
+                                }
+                            },
+                            onFailure = { djiError ->
+                                CallbackUtils.onFailure(callback, djiError)
+                            }
+                        )
+                    } catch (t: Throwable) {
+                        LogUtils.e(logTag, "takePhotoThenDownloadThenUpload exception: ${t.message}")
+                        CallbackUtils.onFailure(
+                            callback,
+                            DJICommonError.FACTORY.build(DJICommonError.UNKNOWN)
+                        )
+                    }
+                }
+            }
+
+            override fun onFailure(error: IDJIError) {
+                CallbackUtils.onFailure(callback, error)
+            }
+        })
+    }
+
+    /**
+     * Downloads a single MediaFile into /mediafile/<filename> and returns the File via callback.
+     * This is a "callback-friendly" version of your existing downloadFile().
+     */
+    private fun downloadFileWithCallback(
+        mediaFile: MediaFile,
+        onSuccess: (File) -> Unit,
+        onFailure: (IDJIError) -> Unit
+    ) {
+        val dirs = File(DiskUtil.getExternalCacheDirPath(ContextUtil.getContext(), "/mediafile"))
+        if (!dirs.exists()) dirs.mkdirs()
+
+        val filepath = DiskUtil.getExternalCacheDirPath(
+            ContextUtil.getContext(),
+            "/mediafile/" + mediaFile.fileName
+        )
+        val file = File(filepath)
+
+        var offset = 0L
+        val outputStream = FileOutputStream(file, true)
+        val bos = BufferedOutputStream(outputStream)
+
+        mediaFile.pullOriginalMediaFileFromCamera(offset, object : MediaFileDownloadListener {
+            override fun onStart() {
+                LogUtils.i("MediaFile", "${mediaFile.fileIndex} start download -> $filepath")
+            }
+
+            override fun onProgress(total: Long, current: Long) {
+                val fullSize = offset + total
+                val downloadedSize = offset + current
+                val data: Double = StringUtils.formatDouble((downloadedSize.toDouble() / fullSize.toDouble()))
+                val result: String = StringUtils.formatDouble(data * 100, "#0").toString() + "%"
+                LogUtils.i("MediaFile", "${mediaFile.fileIndex} progress $result")
+            }
+
+            override fun onRealtimeDataUpdate(data: ByteArray, position: Long) {
+                try {
+                    bos.write(data)
+                    bos.flush()
+                } catch (e: IOException) {
+                    LogUtils.e("MediaFile", "write error ${e.message}")
+                }
+            }
+
+            override fun onFinish() {
+                try {
+                    outputStream.close()
+                    bos.close()
+                } catch (e: IOException) {
+                    LogUtils.e("MediaFile", "close error ${e.message}")
+                }
+                LogUtils.i("MediaFile", "${mediaFile.fileIndex} download finish -> $filepath")
+                onSuccess(file)
+            }
+
+            override fun onFailure(error: IDJIError?) {
+                try {
+                    outputStream.close()
+                    bos.close()
+                } catch (_: IOException) {}
+                val err = error ?: DJICommonError.FACTORY.build(DJICommonError.UNKNOWN)
+                LogUtils.e("MediaFile", "download error $err")
+                onFailure(err)
+            }
+        })
+    }
+
+    /**
+     * Waits for the media file list to update after taking a photo and returns the newest MediaFile.
+     *
+     * How it works:
+     * - Pulls the latest list repeatedly (polling) until it sees a newest item.
+     * - Uses mediaFileListData (already present) as source of truth.
+     *
+     * Assumption:
+     * - Newest file appears at index 0 or has the largest fileIndex.
+     *   DJI ordering can vary by camera/firmware; we handle both.
+     */
+    private suspend fun waitForNewestMediaFileOrNull(timeoutMs: Long): MediaFile? {
+        val start = System.currentTimeMillis()
+
+        // Snapshot baseline: current "newest" identity
+        val baseline = mediaFileListData.value?.data
+        val baselineTopName = baseline?.firstOrNull()?.fileName
+        val baselineMaxIndex = baseline?.maxOfOrNull { it.fileIndex } ?: -1
+
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            // Trigger a refresh pull (small batch from 0)
+            // If your camera has huge lists, pulling 20 is usually enough for newest.
+            pullMediaFileListFromCamera(mediaFileIndex = 0, count = 20)
+
+            // Give time for async update
+            delay(500)
+
+            val list = mediaFileListData.value?.data
+            if (list.isNullOrEmpty()) continue
+
+            // Candidate 1: list[0] changed
+            val top = list.firstOrNull()
+            if (top != null && top.fileName != baselineTopName) return top
+
+            // Candidate 2: any fileIndex greater than baseline max
+            val max = list.maxByOrNull { it.fileIndex }
+            if (max != null && max.fileIndex > baselineMaxIndex) return max
+        }
+
+        return null
     }
 }

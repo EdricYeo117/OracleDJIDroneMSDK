@@ -119,6 +119,14 @@
         android:text="virtual info">
     </TextView>
 
+    <include
+        android:id="@+id/remote_control_panel"
+        layout="@layout/view_remote_control_panel"
+        app:layout_constraintStart_toEndOf="@id/stick_button_list"
+        app:layout_constraintTop_toBottomOf="@id/virtual_stick_info_tv"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="8dp"/>
+
     <TextView
         android:id="@+id/simulator_state_info_tv"
         android:layout_width="wrap_content"

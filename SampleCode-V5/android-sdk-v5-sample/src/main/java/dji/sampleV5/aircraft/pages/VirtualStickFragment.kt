@@ -1,5 +1,8 @@
 package dji.sampleV5.aircraft.pages
 
+import dji.sampleV5.aircraft.R
+import dji.sampleV5.aircraft.models.MediaVM
+import dji.sampleV5.aircraft.remote.ui.RemoteControlPanelBinder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -35,6 +38,7 @@ class VirtualStickFragment : DJIFragment() {
     private val basicAircraftControlVM: BasicAircraftControlVM by activityViewModels()
     private val virtualStickVM: VirtualStickVM by activityViewModels()
     private val simulatorVM: SimulatorVM by activityViewModels()
+    private val mediaVM: MediaVM by activityViewModels()
     private var binding: FragVirtualStickPageBinding? = null
     private val deviation: Double = 0.02
 
@@ -49,25 +53,29 @@ class VirtualStickFragment : DJIFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // Remote panel (only if included in XML)
+        val panelRoot = view.findViewById<View?>(R.id.remote_control_panel)
+        if (panelRoot != null) {
+            RemoteControlPanelBinder(
+                root = panelRoot,
+                appContext = requireContext().applicationContext,
+                mediaVM = mediaVM
+            ).bind()
+        }
+
         binding?.widgetHorizontalSituationIndicator?.setSimpleModeEnable(false)
         initBtnClickListener()
         initStickListener()
+
         virtualStickVM.listenRCStick()
-        virtualStickVM.currentSpeedLevel.observe(viewLifecycleOwner) {
-            updateVirtualStickInfo()
-        }
-        virtualStickVM.useRcStick.observe(viewLifecycleOwner) {
-            updateVirtualStickInfo()
-        }
-        virtualStickVM.currentVirtualStickStateInfo.observe(viewLifecycleOwner) {
-            updateVirtualStickInfo()
-        }
-        virtualStickVM.stickValue.observe(viewLifecycleOwner) {
-            updateVirtualStickInfo()
-        }
-        virtualStickVM.virtualStickAdvancedParam.observe(viewLifecycleOwner) {
-            updateVirtualStickInfo()
-        }
+
+        virtualStickVM.currentSpeedLevel.observe(viewLifecycleOwner) { updateVirtualStickInfo() }
+        virtualStickVM.useRcStick.observe(viewLifecycleOwner) { updateVirtualStickInfo() }
+        virtualStickVM.currentVirtualStickStateInfo.observe(viewLifecycleOwner) { updateVirtualStickInfo() }
+        virtualStickVM.stickValue.observe(viewLifecycleOwner) { updateVirtualStickInfo() }
+        virtualStickVM.virtualStickAdvancedParam.observe(viewLifecycleOwner) { updateVirtualStickInfo() }
+
         simulatorVM.simulatorStateSb.observe(viewLifecycleOwner) {
             binding?.simulatorStateInfoTv?.text = it
         }

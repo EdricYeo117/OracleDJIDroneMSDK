@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/remote_panel_card"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    app:cardUseCompatPadding="true"
+    app:cardElevation="4dp"
+    app:cardCornerRadius="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/tv_remote_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Remote Listener"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_remote_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Status: Unknown" />
+
+        <TextView
+            android:id="@+id/tv_remote_ip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="IP: -, Port: 18080" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="8dp">
+
+            <Button
+                android:id="@+id/btn_remote_start"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Start" />
+
+            <Button
+                android:id="@+id/btn_remote_stop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Stop" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/et_red_upload_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="RED upload URL (optional)"
+            android:inputType="textUri"
+            android:paddingTop="8dp" />
+
+        <Button
+            android:id="@+id/btn_photo_upload"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Take Photo + Upload"
+            android:layout_marginTop="8dp" />
+
+    </LinearLayout>
+</androidx.cardview.widget.CardView>
