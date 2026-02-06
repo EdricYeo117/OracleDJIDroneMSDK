@@ -104,6 +104,13 @@
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/btn_set_virtual_stick_advanced_param" />
+            <Button
+                android:id="@+id/btn_open_remote_automation"
+                style="@style/main_fragment_btn"
+                android:text="Remote / Automation"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/btn_send_virtual_stick_advanced_param" />
         </androidx.constraintlayout.widget.ConstraintLayout>
     </androidx.core.widget.NestedScrollView>
 
@@ -119,13 +126,14 @@
         android:text="virtual info">
     </TextView>
 
-    <include
-        android:id="@+id/remote_control_panel"
-        layout="@layout/view_remote_control_panel"
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/remote_feature_container"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
         app:layout_constraintStart_toEndOf="@id/stick_button_list"
-        app:layout_constraintTop_toBottomOf="@id/virtual_stick_info_tv"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_margin="8dp"/>
+        app:layout_constraintTop_toBottomOf="@id/virtual_stick_info_tv"
+        app:layout_constraintBottom_toTopOf="@id/widget_horizontal_situation_indicator" />
 
     <TextView
         android:id="@+id/simulator_state_info_tv"

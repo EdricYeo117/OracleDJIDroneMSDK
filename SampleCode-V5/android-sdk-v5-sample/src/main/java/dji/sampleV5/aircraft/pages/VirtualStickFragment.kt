@@ -2,6 +2,7 @@ package dji.sampleV5.aircraft.pages
 
 import dji.sampleV5.aircraft.R
 import dji.sampleV5.aircraft.models.MediaVM
+import android.content.Intent
 import dji.sampleV5.aircraft.remote.ui.RemoteControlPanelBinder
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -55,14 +56,14 @@ class VirtualStickFragment : DJIFragment() {
         super.onViewCreated(view, savedInstanceState)
 
         // Remote panel (only if included in XML)
-        val panelRoot = view.findViewById<View?>(R.id.remote_control_panel)
-        if (panelRoot != null) {
-            RemoteControlPanelBinder(
-                root = panelRoot,
-                appContext = requireContext().applicationContext,
-                mediaVM = mediaVM
-            ).bind()
-        }
+//        val panelRoot = view.findViewById<View?>(R.id.remote_control_panel)
+//        if (panelRoot != null) {
+//            RemoteControlPanelBinder(
+//                root = panelRoot,
+//                appContext = requireContext().applicationContext,
+//                mediaVM = mediaVM
+//            ).bind()
+//        }
 
         binding?.widgetHorizontalSituationIndicator?.setSimpleModeEnable(false)
         initBtnClickListener()
@@ -144,6 +145,14 @@ class VirtualStickFragment : DJIFragment() {
                 )
             }
         }
+
+        binding?.btnOpenRemoteAutomation?.setOnClickListener {
+            childFragmentManager.beginTransaction()
+                .replace(R.id.remote_feature_container, RemoteAutomationFragment())
+                .addToBackStack("RemoteAutomation")
+                .commit()
+        }
+
         binding?.btnSetVirtualStickAdvancedParam?.setOnClickListener {
             KeyValueDialogUtil.showInputDialog(
                 activity, "Set Virtual Stick Advanced Param",

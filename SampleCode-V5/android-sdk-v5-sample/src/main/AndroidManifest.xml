@@ -100,7 +100,12 @@
             android:theme="@style/full_screen_theme"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden"/>
-
+        <activity
+            android:name="dji.sampleV5.aircraft.pages.RemoteAutomationActivity"
+            android:exported="false"
+            android:theme="@style/full_screen_theme"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
         <service
             android:name="dji.sampleV5.aircraft.remote.RemoteCommandService"
             android:exported="false"

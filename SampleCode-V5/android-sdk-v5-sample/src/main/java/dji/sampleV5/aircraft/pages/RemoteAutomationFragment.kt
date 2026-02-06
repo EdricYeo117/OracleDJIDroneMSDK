@@ -26,8 +26,8 @@ class RemoteAutomationFragment : DJIFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Your frag_remote_automation.xml has: android:id="@+id/remotePanel"
-        val panelRoot = binding!!.remotePanel.root
+        // Requires: <include android:id="@+id/remotePanel" ... />
+        val panelRoot: View = binding!!.remotePanel.root
         RemoteControlPanelBinder(
             root = panelRoot,
             appContext = requireContext().applicationContext,
