@@ -148,16 +148,16 @@
     <dji.sampleV5.aircraft.virtualstick.OnScreenJoystick
         android:id="@+id/left_stick_view"
         android:background="@mipmap/joystick_bg"
-        android:layout_width="200dp"
-        android:layout_height="200dp"
+        android:layout_width="140dp"
+        android:layout_height="140dp"
         app:layout_constraintStart_toEndOf="@+id/stick_button_list"
         app:layout_constraintBottom_toBottomOf="parent" />
 
     <dji.sampleV5.aircraft.virtualstick.OnScreenJoystick
         android:id="@+id/right_stick_view"
         android:background="@mipmap/joystick_bg"
-        android:layout_width="200dp"
-        android:layout_height="200dp"
+        android:layout_width="140dp"
+        android:layout_height="140dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toBottomOf="parent" />
 
