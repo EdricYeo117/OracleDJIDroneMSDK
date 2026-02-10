@@ -28,6 +28,26 @@ object DroneCommandBridge {
         this.media = null
     }
 
+
+    fun bindVirtualStick(f: VirtualStickFacade) {
+        virtualStick = f
+        android.util.Log.i("DJI_CMD", "VirtualStickFacade bound")
+    }
+
+    fun bindMedia(f: MediaFacade) {
+        media = f
+        android.util.Log.i("DJI_CMD", "MediaFacade bound")
+    }
+
+    fun unbindAll() {
+        virtualStick = null
+        media = null
+        android.util.Log.w("DJI_CMD", "facades unbound")
+    }
+
+    fun virtualStickFacadeOrNull(): VirtualStickFacade? = virtualStick
+    fun mediaFacadeOrNull(): MediaFacade? = media
+
     fun enableVirtualStick(enable: Boolean, cb: (Boolean, String?) -> Unit) {
         val vs = virtualStick ?: return cb(false, "VirtualStickFacade not bound")
         mainHandler.post {

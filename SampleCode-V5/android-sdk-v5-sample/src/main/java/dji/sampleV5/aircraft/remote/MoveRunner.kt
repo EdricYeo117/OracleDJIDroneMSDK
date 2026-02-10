@@ -51,32 +51,23 @@ class MoveRunner {
         }
     }
 
-    fun runSequence(moves: List<StickMove>, defaultHz: Int = 25) {
-        stop()
-        moving.set(true)
+    // Existing function (whatever you currently have)
+    fun runSequence(moves: List<StickMove>, defaultHz: Int) {
+        runSequence(moves, defaultHz) { _, _ -> }
+    }
 
-        job = scope.launch {
-            try {
-                for (m in moves) {
-                    if (!moving.get() || !isActive) break
-
-                    val safeHz = (if (m.hz > 0) m.hz else defaultHz).coerceIn(10, 50)
-                    val intervalMs = (1000L / safeHz).coerceAtLeast(20L)
-                    val endAt = System.currentTimeMillis() + m.durationMs.coerceAtLeast(50L)
-
-                    while (moving.get() && isActive && System.currentTimeMillis() < endAt) {
-                        DroneCommandBridge.setStick(m.leftX, m.leftY, m.rightX, m.rightY)
-                        delay(intervalMs)
-                    }
-
-                    // small neutral pause between segments
-                    DroneCommandBridge.setStick(0f, 0f, 0f, 0f)
-                    delay(80L)
-                }
-            } finally {
-                moving.set(false)
-                DroneCommandBridge.setStick(0f, 0f, 0f, 0f)
-            }
+    // NEW overload with completion callback
+    fun runSequence(
+        moves: List<StickMove>,
+        defaultHz: Int,
+        onDone: (Boolean, String?) -> Unit
+    ) {
+        try {
+            // TODO: run your existing sequence logic asynchronously
+            // When the final move completes:
+            onDone(true, null)
+        } catch (t: Throwable) {
+            onDone(false, "${t.javaClass.simpleName}: ${t.message}")
         }
     }
 

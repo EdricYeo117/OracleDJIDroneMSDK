@@ -23,29 +23,45 @@ class RemoteCommandService : Service() {
     private val moveRunner = MoveRunner()
     private var sseClient: SseCommandClient? = null
 
+    // NEW
+    private val pending: ArrayDeque<JSONObject> = ArrayDeque()
+    @Volatile private var facadesReady: Boolean = false
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
 
-        // Build base URL from your saved UI config (host/port)
-        // If you don't have PythonServerConfigStore yet, replace with "http://192.168.1.49:8080"
         val pythonBaseUrl = try {
             PythonServerConfigStore.get(this).baseUrl()
         } catch (t: Throwable) {
             "http://192.168.1.49:8080"
         }
 
-        val deviceId = "android-controller-01" // make this configurable later if you want
-        val apiKey: String? = null             // or load from prefs/env if you use X-API-Key
+        val deviceId = "android-controller-01"
+        val apiKey: String? = null
 
         startForeground(NOTIF_ID, buildNotification("Connecting to $pythonBaseUrl"))
+
+        // NEW: keep checking readiness in the background
+        startFacadeReadyWatcher()
 
         sseClient = SseCommandClient(
             baseUrl = pythonBaseUrl,
             deviceId = deviceId,
             apiKey = apiKey,
             onCommand = { json: JSONObject ->
-                // THIS is the call site you asked about:
+                // GATE: queue until facades are bound
+                if (!isFacadesReadyNow()) {
+                    pending.addLast(json)
+                    android.util.Log.w("DJI_CMD", "NOT_READY queue size=${pending.size} cmd=${json.optString("cmd_type")} id=${json.optString("command_id")}")
+                    // Optional: immediately NACK so server can retry later instead of silent queue
+                    // DroneHttpClient.postAck(pythonBaseUrl, deviceId, json.optString("command_id"), ok=false, error="NOT_READY: facades not bound")
+                    return@SseCommandClient
+                }
+
+                // flush anything queued first
+                flushPending(pythonBaseUrl, deviceId)
+
                 CommandDispatcher.handleCommand(
                     cmd = json,
                     moveRunner = moveRunner,
@@ -59,10 +75,58 @@ class RemoteCommandService : Service() {
         ).also { it.start() }
     }
 
+    private fun isFacadesReadyNow(): Boolean {
+        // You’ll need these accessors in DroneCommandBridge (see section 2)
+        val vsOk = DroneCommandBridge.virtualStickFacadeOrNull() != null
+        val mediaOk = DroneCommandBridge.mediaFacadeOrNull() != null
+        val ready = vsOk && mediaOk
+
+        if (ready != facadesReady) {
+            facadesReady = ready
+            android.util.Log.i("DJI_CMD", "facadesReady=$facadesReady vs=$vsOk media=$mediaOk pending=${pending.size}")
+        }
+        return ready
+    }
+
+    private fun flushPending(pythonBaseUrl: String, deviceId: String) {
+        if (!isFacadesReadyNow()) return
+        if (pending.isEmpty()) return
+
+        android.util.Log.i("DJI_CMD", "flushing pending=${pending.size}")
+        while (pending.isNotEmpty()) {
+            val cmd = pending.removeFirst()
+            CommandDispatcher.handleCommand(
+                cmd = cmd,
+                moveRunner = moveRunner,
+                pythonBaseUrl = pythonBaseUrl,
+                deviceId = deviceId
+            )
+        }
+    }
+
+    private fun startFacadeReadyWatcher() {
+        // Periodic poll: minimal change, very reliable.
+        // If you prefer callbacks, do it in DroneCommandBridge; polling is fine for now.
+        val t = Thread {
+            while (isRunning) {
+                try {
+                    val ready = isFacadesReadyNow()
+                    if (ready) {
+                        // If SSE is already connected and commands queued, flushing happens in onCommand.
+                        // This log just helps you see readiness transition in Logcat.
+                    }
+                    Thread.sleep(500)
+                } catch (_: Throwable) {}
+            }
+        }
+        t.name = "FacadeReadyWatcher"
+        t.isDaemon = true
+        t.start()
+    }
+
     override fun onDestroy() {
         sseClient?.stop()
         sseClient = null
-
         moveRunner.stop()
         isRunning = false
         super.onDestroy()
