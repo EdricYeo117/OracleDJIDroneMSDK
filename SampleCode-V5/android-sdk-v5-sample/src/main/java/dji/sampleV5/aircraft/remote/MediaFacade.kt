@@ -6,5 +6,5 @@ package dji.sampleV5.aircraft.remote
  * You implement takePhoto -> download -> upload-to-RED inside the MediaVM wrapper.
  */
 interface MediaFacade {
-    fun takePhotoAndUpload(redUploadUrl: String, cb: (Boolean, String?) -> Unit)
+    fun takePhotoAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 }

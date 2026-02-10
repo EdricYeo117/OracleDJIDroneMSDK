@@ -17,7 +17,13 @@ data class MoveReq(
     val hz: Int = 25
 )
 
-data class PhotoReq(val redUploadUrl: String)
+data class MoveSequenceReq(
+    val moves: List<StickMove>,
+    val defaultHz: Int = 25
+)
+
+data class PhotoReq(val uploadUrl: String)
+
 /**
  * Embedded HTTP server that receives JSON commands from RED (Ubuntu / Node-RED)
  * and dispatches to DroneCommandBridge + MoveRunner.
@@ -31,59 +37,62 @@ data class PhotoReq(val redUploadUrl: String)
  */
 class RemoteHttpServer(
     private val port: Int,
-    private val moveRunner: MoveRunner
+    private val moveRunner: MoveRunner,
+    private val apiKey: String? = null, // <- NEW (CONTROLLER_API_KEY)
 ) {
-
     private val gson = Gson()
     private val started = AtomicBoolean(false)
 
     private val httpd: NanoHTTPD = object : NanoHTTPD(port) {
 
+        private fun enforceApiKey(session: IHTTPSession): Response? {
+            val expected = apiKey?.trim().orEmpty()
+            if (expected.isEmpty()) return null // auth disabled
+            val got = session.headers["x-api-key"]?.trim().orEmpty()
+            return if (got == expected) null
+            else jsonErr(
+                status = Response.Status.UNAUTHORIZED,
+                payload = mapOf("error" to "unauthorized")
+            )
+        }
         override fun serve(session: IHTTPSession): Response {
+            enforceApiKey(session)?.let { return it }
             return try {
                 val method = session.method
                 val path = session.uri
 
                 when {
-                    method == Method.GET && path == "/health" -> {
-                        jsonOk(mapOf("ok" to true, "port" to port))
+                    method == Method.GET && path == "/v1/drone/status" -> {
+                        jsonOk(
+                            mapOf(
+                                "ok" to true,
+                                "port" to port,
+                                "ip" to (NetworkInfo.getLocalIpv4() ?: "unknown")
+                            )
+                        )
                     }
 
-                    method == Method.POST && path == "/vs/enable" -> {
+                    method == Method.POST && path == "/v1/drone/vs/enable" -> {
                         val req = gson.fromJson(readBody(session), EnableReq::class.java)
-
-                        DroneCommandBridge.enableVirtualStick(req.enable) { _, _ ->
-                            // async callback; returning immediately
-                        }
+                        DroneCommandBridge.enableVirtualStick(req.enable) { _, _ -> }
                         jsonOk(mapOf("queued" to true, "enable" to req.enable))
                     }
 
-                    method == Method.POST && path == "/vs/move" -> {
-                        val req = gson.fromJson(readBody(session), MoveReq::class.java)
-
-                        moveRunner.runMove(
-                            leftX = req.leftX,
-                            leftY = req.leftY,
-                            rightX = req.rightX,
-                            rightY = req.rightY,
-                            durationMs = req.durationMs,
-                            hz = req.hz
-                        )
-                        jsonOk(mapOf("queued" to true))
+                    method == Method.POST && path == "/v1/drone/vs/moveSequence" -> {
+                        val req = gson.fromJson(readBody(session), MoveSequenceReq::class.java)
+                        moveRunner.runSequence(req.moves, req.defaultHz)
+                        jsonOk(mapOf("queued" to true, "count" to req.moves.size))
                     }
 
-                    method == Method.POST && path == "/vs/stop" -> {
+                    method == Method.POST && path == "/v1/drone/vs/stop" -> {
                         moveRunner.stop()
                         jsonOk(mapOf("stopped" to true))
                     }
 
-                    method == Method.POST && path == "/media/photo" -> {
+                    method == Method.POST && path == "/v1/drone/media/photo" -> {
                         val req = gson.fromJson(readBody(session), PhotoReq::class.java)
-
-                        DroneCommandBridge.takePhotoAndUpload(req.redUploadUrl) { _, _ ->
-                            // async callback; returning immediately
-                        }
-                        jsonOk(mapOf("queued" to true, "uploadTo" to req.redUploadUrl))
+                        DroneCommandBridge.takePhotoAndUpload(req.uploadUrl) { _, _ -> }
+                        jsonOk(mapOf("queued" to true, "uploadTo" to req.uploadUrl))
                     }
 
                     else -> jsonErr(

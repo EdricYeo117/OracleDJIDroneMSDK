@@ -8,6 +8,7 @@ import android.widget.TextView
 import dji.sampleV5.aircraft.R
 import dji.sampleV5.aircraft.models.MediaVM
 import dji.sampleV5.aircraft.remote.NetworkInfo
+import dji.sampleV5.aircraft.remote.PythonServerConfigStore
 import dji.sampleV5.aircraft.remote.RemoteCommandService
 import dji.sampleV5.aircraft.remote.RemoteServiceController
 import dji.sampleV5.aircraft.util.ToastUtils
@@ -22,26 +23,65 @@ class RemoteControlPanelBinder(
 
     private val tvStatus: TextView = root.findViewById(R.id.tv_remote_status)
     private val tvIp: TextView = root.findViewById(R.id.tv_remote_ip)
+
+    // NEW: python server host/port
+    private val etPythonHost: EditText = root.findViewById(R.id.et_python_host)
+    private val etPythonPort: EditText = root.findViewById(R.id.et_python_port)
+
+    // Existing: upload URL (we will derive it)
     private val etUrl: EditText = root.findViewById(R.id.et_red_upload_url)
 
-    private fun defaultUploadUrl(): String {
-        val scheme = appContext.getString(dji.sampleV5.aircraft.R.string.red_scheme_default)
-        val host = appContext.getString(dji.sampleV5.aircraft.R.string.red_host_default)
-        val port = appContext.getString(dji.sampleV5.aircraft.R.string.red_port_default)
-        val path = appContext.getString(dji.sampleV5.aircraft.R.string.red_upload_path_default)
-        return "$scheme://$host:$port$path"
+    companion object {
+        // Change this to your real python upload route
+        private const val UPLOAD_PATH = "/v1/drone/uploads/photo"
+        private const val DEFAULT_PY_HOST = "192.168.1.49"
+        private const val DEFAULT_PY_PORT = 8080
+    }
+
+    private fun buildUploadUrl(host: String, port: Int): String {
+        val safeHost = host.trim()
+        val safePort = port.coerceIn(1, 65535)
+        return "http://$safeHost:$safePort$UPLOAD_PATH"
     }
 
     fun bind() {
-        // IP display
+        // Controller listener (local)
         val ip = NetworkInfo.getLocalIpv4() ?: "Unknown"
-        tvIp.text = "IP: $ip, Port: ${RemoteCommandService.DEFAULT_PORT}"
+        tvIp.text = "Controller IP: $ip"
 
+        // Load saved python server config
+        val cfg = PythonServerConfigStore.get(appContext)
+
+        if (etPythonHost.text.isNullOrBlank()) etPythonHost.setText(cfg.host)
+        if (etPythonPort.text.isNullOrBlank()) etPythonPort.setText(cfg.port.toString())
+
+        // Derive upload URL from host/port (you can still allow manual edits if desired)
         if (etUrl.text.isNullOrBlank()) {
-            etUrl.setText(defaultUploadUrl())
+            etUrl.setText(buildUploadUrl(cfg.host, cfg.port))
         }
 
-        // Start/Stop
+        // Save python server host/port
+        root.findViewById<Button>(R.id.btn_save_python_server).setOnClickListener {
+            val host = etPythonHost.text?.toString()?.trim().orEmpty()
+            val port = etPythonPort.text?.toString()?.trim()?.toIntOrNull()
+
+            if (host.isEmpty()) {
+                ToastUtils.showToast("Python server IP cannot be empty")
+                return@setOnClickListener
+            }
+            if (port == null || port !in 1..65535) {
+                ToastUtils.showToast("Invalid port")
+                return@setOnClickListener
+            }
+
+            PythonServerConfigStore.set(appContext, host, port)
+            etUrl.setText(buildUploadUrl(host, port))
+
+            ToastUtils.showToast("Saved Python server: $host:$port")
+            refreshStatus()
+        }
+
+        // Start/Stop controller listener
         root.findViewById<Button>(R.id.btn_remote_start).setOnClickListener {
             RemoteServiceController.start(appContext)
             ToastUtils.showToast("Remote listener started")
@@ -54,11 +94,22 @@ class RemoteControlPanelBinder(
             refreshStatus()
         }
 
-        // Photo + upload
+        // Photo + upload (uses derived URL unless user overwrote it)
         root.findViewById<Button>(R.id.btn_photo_upload).setOnClickListener {
+            val host = etPythonHost.text?.toString()?.trim().orEmpty()
+            val port = etPythonPort.text?.toString()?.trim()?.toIntOrNull() ?: DEFAULT_PY_PORT
+
+            if (host.isEmpty()) {
+                ToastUtils.showToast("Enter Python server IP")
+                return@setOnClickListener
+            }
+
+            // Prefer explicit URL field if user manually edited it, else derive it
             val url = etUrl.text?.toString()?.trim().orEmpty()
+                .ifEmpty { buildUploadUrl(host, port) }
+
             if (url.isEmpty()) {
-                ToastUtils.showToast("Enter RED upload URL")
+                ToastUtils.showToast("Upload URL is empty")
                 return@setOnClickListener
             }
 
@@ -77,6 +128,12 @@ class RemoteControlPanelBinder(
     }
 
     private fun refreshStatus() {
-        tvStatus.text = "Status: " + if (RemoteCommandService.isRunning) "Running" else "Stopped"
+        val running = RemoteCommandService.isRunning
+        val host = etPythonHost.text?.toString()?.trim().orEmpty().ifEmpty { DEFAULT_PY_HOST }
+        val port = etPythonPort.text?.toString()?.trim()?.toIntOrNull() ?: DEFAULT_PY_PORT
+
+        tvStatus.text =
+            "Status: " + (if (running) "Running" else "Stopped") +
+                    " | Python: $host:$port"
     }
 }
