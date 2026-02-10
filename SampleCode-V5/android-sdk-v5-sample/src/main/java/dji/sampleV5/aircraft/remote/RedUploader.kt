@@ -1,6 +1,6 @@
 // File: SampleCode-V5/android-sdk-v5-sample/src/main/java/dji/sampleV5/aircraft/remote/RedUploader.kt
 package dji.sampleV5.aircraft.remote
-import dji.sampleV5.aircraft.remote.RedUploader
+import dji.sampleV5.aircraft.remote.MultipartUploader
 
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -13,34 +13,29 @@ import java.io.File
  * Uploads the captured photo file to RED (Node-RED) via multipart/form-data.
  * Node-RED should accept "file" field by default if you use a multipart parser.
  */
-object RedUploader {
+object MultipartUploader {
     private val client = OkHttpClient()
 
-    /**
-     * @return Pair(success, errorMessage)
-     */
-    fun uploadFile(uploadUrl: String, file: File): Pair<Boolean, String?> {
+    fun uploadFile(
+        uploadUrl: String,
+        file: File,
+        headers: Map<String, String> = emptyMap()
+    ): Pair<Boolean, String?> {
+
         val mediaType = guessMediaType(file)
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart(
-                name = "file",
-                filename = file.name,
-                body = file.asRequestBody(mediaType.toMediaType())
-            )
+            .addFormDataPart("file", file.name, file.asRequestBody(mediaType.toMediaType()))
             .build()
 
-        val request = Request.Builder()
-            .url(uploadUrl)
-            .post(body)
-            .build()
+        val reqBuilder = Request.Builder().url(uploadUrl).post(body)
+        headers.forEach { (k, v) -> reqBuilder.addHeader(k, v) }
 
-        client.newCall(request).execute().use { resp ->
+        client.newCall(reqBuilder.build()).execute().use { resp ->
             if (resp.isSuccessful) return true to null
             return false to "Upload failed: HTTP ${resp.code} ${resp.message}"
         }
     }
-
     private fun guessMediaType(file: File): String {
         val name = file.name.lowercase()
         return when {

@@ -3,7 +3,7 @@ package dji.sampleV5.aircraft.models
 import androidx.lifecycle.MutableLiveData
 import dji.sampleV5.aircraft.R
 import dji.sampleV5.aircraft.data.DJIToastResult
-import dji.sampleV5.aircraft.remote.RedUploader
+import dji.sampleV5.aircraft.remote.MultipartUploader
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.key.KeyTools.createKey
@@ -299,7 +299,7 @@ class MediaVM : DJIViewModel() {
                                 // Step 4: upload to RED off main thread
                                 CoroutineScope(Dispatchers.IO).launch {
                                     val (ok, errMsg) = try {
-                                        RedUploader.uploadFile(redUploadUrl, downloadedFile)
+                                        MultipartUploader.uploadFile(redUploadUrl, downloadedFile)
                                     } catch (t: Throwable) {
                                         false to (t.message ?: "upload exception")
                                     }

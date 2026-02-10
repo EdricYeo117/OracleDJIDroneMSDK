@@ -67,13 +67,55 @@
                         android:text="Stop" />
                 </LinearLayout>
 
+                <!-- NEW: Python Server (Intruder Server) Target -->
+                <TextView
+                    android:id="@+id/tv_python_server_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Python server (intruder-server)"
+                    android:paddingTop="12dp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingTop="6dp">
+
+                    <EditText
+                        android:id="@+id/et_python_host"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="IP / Host (e.g. 192.168.1.49)"
+                        android:inputType="text"
+                        android:maxLines="1" />
+
+                    <EditText
+                        android:id="@+id/et_python_port"
+                        android:layout_width="110dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:hint="Port"
+                        android:inputType="number"
+                        android:maxLines="1" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btn_save_python_server"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Save server"
+                    android:layout_marginTop="8dp" />
+
+                <!-- Existing: Upload URL (now can be derived from host/port, but still editable) -->
                 <EditText
                     android:id="@+id/et_red_upload_url"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="RED upload URL (optional)"
+                    android:hint="Upload URL (optional)"
                     android:inputType="textUri"
-                    android:paddingTop="8dp" />
+                    android:paddingTop="12dp" />
 
                 <Button
                     android:id="@+id/btn_photo_upload"

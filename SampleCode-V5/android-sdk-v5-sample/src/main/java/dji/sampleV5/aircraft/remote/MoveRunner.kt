@@ -8,6 +8,15 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Runs a timed loop sending virtual stick updates at a configured frequency.
  * This is important because many Virtual Stick implementations require continuous updates.
  */
+data class StickMove(
+    val leftX: Float,
+    val leftY: Float,
+    val rightX: Float,
+    val rightY: Float,
+    val durationMs: Long = 800,
+    val hz: Int = 25
+)
+
 class MoveRunner {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -22,7 +31,6 @@ class MoveRunner {
         durationMs: Long,
         hz: Int
     ) {
-        // Cancel any existing move
         stop()
 
         moving.set(true)
@@ -32,13 +40,41 @@ class MoveRunner {
 
         job = scope.launch {
             try {
-                while (moving.get() && System.currentTimeMillis() < endAt) {
+                while (moving.get() && isActive && System.currentTimeMillis() < endAt) {
                     DroneCommandBridge.setStick(leftX, leftY, rightX, rightY)
                     delay(intervalMs)
                 }
             } finally {
                 moving.set(false)
-                // Neutralize sticks at end
+                DroneCommandBridge.setStick(0f, 0f, 0f, 0f)
+            }
+        }
+    }
+
+    fun runSequence(moves: List<StickMove>, defaultHz: Int = 25) {
+        stop()
+        moving.set(true)
+
+        job = scope.launch {
+            try {
+                for (m in moves) {
+                    if (!moving.get() || !isActive) break
+
+                    val safeHz = (if (m.hz > 0) m.hz else defaultHz).coerceIn(10, 50)
+                    val intervalMs = (1000L / safeHz).coerceAtLeast(20L)
+                    val endAt = System.currentTimeMillis() + m.durationMs.coerceAtLeast(50L)
+
+                    while (moving.get() && isActive && System.currentTimeMillis() < endAt) {
+                        DroneCommandBridge.setStick(m.leftX, m.leftY, m.rightX, m.rightY)
+                        delay(intervalMs)
+                    }
+
+                    // small neutral pause between segments
+                    DroneCommandBridge.setStick(0f, 0f, 0f, 0f)
+                    delay(80L)
+                }
+            } finally {
+                moving.set(false)
                 DroneCommandBridge.setStick(0f, 0f, 0f, 0f)
             }
         }

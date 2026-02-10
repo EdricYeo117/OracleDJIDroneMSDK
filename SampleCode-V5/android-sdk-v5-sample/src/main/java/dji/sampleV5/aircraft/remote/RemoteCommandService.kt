@@ -1,4 +1,3 @@
-// File: SampleCode-V5/android-sdk-v5-sample/src/main/java/dji/sampleV5/aircraft/remote/RemoteCommandService.kt
 package dji.sampleV5.aircraft.remote
 
 import android.app.Notification
@@ -9,61 +8,96 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import org.json.JSONObject
 
 /**
- * Foreground Service that keeps the embedded HTTP server alive.
- * Start this service from your Aircraft host Activity after SDK is ready / product connected.
+ * Foreground Service that keeps an SSE subscription to the Python server alive.
+ *
+ * Python -> Android: SSE commands
+ * Android -> Python: HTTP ACK + upload (inside MediaFacade)
+ *
+ * Start this service after SDK is ready / product connected AND after DroneCommandBridge.bind(...)
  */
 class RemoteCommandService : Service() {
 
-    private var server: RemoteHttpServer? = null
+    private val moveRunner = MoveRunner()
+    private var sseClient: SseCommandClient? = null
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        startForeground(NOTIF_ID, buildNotification())
 
-        // Start HTTP server
-        server = RemoteHttpServer(
-            port = DEFAULT_PORT,
-            moveRunner = MoveRunner()
-        ).also {
-            it.start()
+        // Build base URL from your saved UI config (host/port)
+        // If you don't have PythonServerConfigStore yet, replace with "http://192.168.1.49:8080"
+        val pythonBaseUrl = try {
+            PythonServerConfigStore.get(this).baseUrl()
+        } catch (t: Throwable) {
+            "http://192.168.1.49:8080"
         }
+
+        val deviceId = "android-controller-01" // make this configurable later if you want
+        val apiKey: String? = null             // or load from prefs/env if you use X-API-Key
+
+        startForeground(NOTIF_ID, buildNotification("Connecting to $pythonBaseUrl"))
+
+        sseClient = SseCommandClient(
+            baseUrl = pythonBaseUrl,
+            deviceId = deviceId,
+            apiKey = apiKey,
+            onCommand = { json: JSONObject ->
+                // THIS is the call site you asked about:
+                CommandDispatcher.handleCommand(
+                    cmd = json,
+                    moveRunner = moveRunner,
+                    pythonBaseUrl = pythonBaseUrl,
+                    deviceId = deviceId
+                )
+            },
+            onStatus = { status ->
+                updateNotification(status)
+            }
+        ).also { it.start() }
     }
 
     override fun onDestroy() {
-        server?.stop()
-        server = null
+        sseClient?.stop()
+        sseClient = null
+
+        moveRunner.stop()
         isRunning = false
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(line: String): Notification {
         val channelId = CHANNEL_ID
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "DJI Remote Commands",
+                "DJI Remote Commands (SSE)",
                 NotificationManager.IMPORTANCE_LOW
             )
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("DJI Remote Command Listener")
-            .setContentText("Listening on port $DEFAULT_PORT")
+            .setContentTitle("DJI Controller (SSE)")
+            .setContentText(line)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setOngoing(true)
             .build()
     }
 
+    private fun updateNotification(line: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(NOTIF_ID, buildNotification(line))
+    }
+
     companion object {
-        const val DEFAULT_PORT = 18080
         private const val CHANNEL_ID = "dji_remote_cmd_channel"
         private const val NOTIF_ID = 1001
+
         @Volatile
         var isRunning: Boolean = false
             private set

@@ -50,11 +50,11 @@ object DroneCommandBridge {
         }
     }
 
-    fun takePhotoAndUpload(redUploadUrl: String, cb: (Boolean, String?) -> Unit) {
+    fun takePhotoAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mainHandler.post {
             try {
-                m.takePhotoAndUpload(redUploadUrl, cb)
+                m.takePhotoAndUpload(uploadUrl, cb)
             } catch (t: Throwable) {
                 cb(false, t.message ?: "takePhotoAndUpload failed")
             }
