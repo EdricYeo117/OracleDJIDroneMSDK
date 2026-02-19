@@ -16,28 +16,34 @@ class SseCommandClient(
     private val onStatus: (String) -> Unit,
     private val onCommand: (JSONObject) -> Unit
 ) {
-    private var eventSource: EventSource? = null
+    @Volatile private var eventSource: okhttp3.sse.EventSource? = null
+    @Volatile private var stopping = false
 
     fun start() {
-        stop()
+        stopping = false
 
-        val url = "${baseUrl.trimEnd('/')}/v1/drone/stream?device_id=$deviceId"
+        val url = "$baseUrl/v1/drone/stream?device_id=$deviceId"
         val reqBuilder = Request.Builder().url(url)
+            .header("Accept", "text/event-stream")
+
         if (!apiKey.isNullOrBlank()) reqBuilder.header("X-API-Key", apiKey)
 
-        val req = reqBuilder.build()
+        val request = reqBuilder.build()
 
-        DjiTrace.i("[SSE] start url=$url device_id=$deviceId apiKey=${if (apiKey.isNullOrBlank()) "none" else "set"}")
-        onStatus("SSE connecting…")
+        eventSource = okhttp3.sse.EventSources.createFactory(okHttpClient)
+            .newEventSource(request, object : okhttp3.sse.EventSourceListener() {
 
-        val factory = EventSources.createFactory(okHttpClient)
-        eventSource = factory.newEventSource(req, object : EventSourceListener() {
-            override fun onOpen(es: EventSource, response: Response) {
-                DjiTrace.i("[SSE] onOpen code=${response.code} msg=${response.message}")
-                onStatus("SSE connected (${response.code})")
-            }
+                override fun onOpen(es: okhttp3.sse.EventSource, response: Response) {
+                    DjiTrace.i("[SSE] onOpen code=${response.code}")
+                    onStatus("connected")
+                }
 
-            override fun onEvent(es: EventSource, id: String?, type: String?, data: String) {
+                override fun onEvent(
+                    es: okhttp3.sse.EventSource,
+                    id: String?,
+                    type: String?,
+                    data: String
+                ) {
                 DjiTrace.i("[SSE] onEvent type=$type id=$id bytes=${data.length}")
                 if (type != "command") return
 
@@ -56,22 +62,40 @@ class SseCommandClient(
                 }
             }
 
-            override fun onClosed(es: EventSource) {
-                DjiTrace.w("[SSE] onClosed")
-                onStatus("SSE closed")
-            }
+                override fun onFailure(
+                    es: okhttp3.sse.EventSource,
+                    t: Throwable?,
+                    response: Response?
+                ) {
+                    // If we are stopping, this is expected (Socket closed)
+                    if (stopping) {
+                        DjiTrace.i("[SSE] closed by client (stopping=true) t=${t?.javaClass?.simpleName}:${t?.message}")
+                        onStatus("disconnected")
+                        return
+                    }
 
-            override fun onFailure(es: EventSource, t: Throwable?, response: Response?) {
-                DjiTrace.e("[SSE] onFailure code=${response?.code} err=${t?.message}", t)
-                onStatus("SSE failure code=${response?.code} err=${t?.message}")
-            }
-        })
+                    DjiTrace.e("[SSE] onFailure code=${response?.code} err=${t?.message}", t)
+                    onStatus("error: ${t?.message}")
+                }
+
+                override fun onClosed(es: okhttp3.sse.EventSource) {
+                    if (stopping) {
+                        DjiTrace.i("[SSE] onClosed (client stop)")
+                        onStatus("disconnected")
+                    } else {
+                        DjiTrace.w("[SSE] onClosed (server closed)")
+                        onStatus("closed")
+                    }
+                }
+            })
     }
 
     fun stop() {
-        if (eventSource != null) {
-            DjiTrace.w("[SSE] stop (cancel)")
-            eventSource?.cancel()
+        stopping = true
+        try {
+            eventSource?.cancel()   // this is the graceful shutdown signal
+        } catch (_: Throwable) {
+        } finally {
             eventSource = null
         }
     }
