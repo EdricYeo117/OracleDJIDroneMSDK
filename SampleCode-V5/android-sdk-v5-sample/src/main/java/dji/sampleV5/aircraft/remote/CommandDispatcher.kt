@@ -1,11 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
-import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 
 object CommandDispatcher {
-
-    private const val TAG = "DJI_CMD"
 
     fun handleCommand(cmd: JSONObject, moveRunner: MoveRunner, pythonBaseUrl: String, deviceId: String) {
         val cmdType = cmd.optString("cmd_type")
@@ -13,10 +11,10 @@ object CommandDispatcher {
         val commandId: String? = commandIdRaw.takeIf { it.isNotBlank() }
         val payload = cmd.optJSONObject("payload") ?: JSONObject()
 
-        Log.i(TAG, "rx cmd_type=$cmdType command_id=$commandId payload=$payload")
+        DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [DISPATCH_RX] payload=${DjiTrace.json(payload)} pythonBaseUrl=$pythonBaseUrl deviceId=$deviceId")
 
         fun ack(ok: Boolean, error: String?) {
-            Log.i(TAG, "ack cmd_type=$cmdType command_id=$commandId ok=$ok err=$error")
+            DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [ACK->POST] ok=$ok error=$error")
             DroneHttpClient.postAck(
                 pythonBaseUrl = pythonBaseUrl,
                 deviceId = deviceId,
@@ -27,80 +25,82 @@ object CommandDispatcher {
         }
 
         when (cmdType) {
-
             "VS_ENABLE" -> {
-                val enabled = payload.optBoolean("enabled", true)
+                val enabled = payload.optBoolean("enabled", payload.optBoolean("enable", true))
+                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [VS_ENABLE] enabled=$enabled")
+                if (DroneCommandBridge.virtualStickFacadeOrNull() == null) {
+                    DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [VS_ENABLE] VirtualStickFacade NOT bound")
+                    ack(false, "VirtualStickFacade not bound")
+                    return
+                }
+                DroneCommandBridge.enableVirtualStick(enabled) { ok, err ->
+                    DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [VS_ENABLE] cb ok=$ok err=$err")
+                    ack(ok, err)
+                }
+            }
+
+            "MOVE_SEQUENCE" -> {
+                val movesArr = payload.optJSONArray("moves")
+                val defaultHz = payload.optInt("defaultHz", 25)
+                if (movesArr == null) {
+                    DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [MOVE_SEQUENCE] Missing moves[]")
+                    ack(false, "Missing moves[]")
+                    return
+                }
+
+                val moves = parseMoves(movesArr)
+                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [MOVE_SEQUENCE] movesCount=${moves.size} defaultHz=$defaultHz")
 
                 if (DroneCommandBridge.virtualStickFacadeOrNull() == null) {
+                    DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [MOVE_SEQUENCE] VirtualStickFacade NOT bound")
                     ack(false, "VirtualStickFacade not bound")
                     return
                 }
 
-                DroneCommandBridge.enableVirtualStick(enabled) { ok, err ->
+                moveRunner.runSequence(moves, defaultHz) { ok, err ->
+                    DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [MOVE_SEQUENCE] onDone ok=$ok err=$err")
+                    ack(ok, err)
+                }
+            }
+
+            "SNAPSHOT", "TAKE_PHOTO" -> {
+                val uploadUrl =
+                    payload.optString("uploadUrl").ifBlank { payload.optString("upload_url") }
+                        .ifBlank { "${pythonBaseUrl.trimEnd('/')}/v1/drone/uploads/photo" }
+
+                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [SNAPSHOT] uploadUrl=$uploadUrl")
+
+                DroneCommandBridge.takePhotoAndUpload(uploadUrl) { ok, err ->
+                    DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [SNAPSHOT] cb ok=$ok err=$err")
                     ack(ok, err)
                 }
             }
 
             "VS_STOP" -> {
+                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [VS_STOP] stop requested")
                 moveRunner.stop()
                 ack(true, null)
             }
 
-            "MOVE_SEQUENCE" -> {
-                if (DroneCommandBridge.virtualStickFacadeOrNull() == null) {
-                    ack(false, "VirtualStickFacade not bound")
-                    return
-                }
-
-                val movesArr = payload.optJSONArray("moves")
-                if (movesArr == null) {
-                    ack(false, "Missing moves[]")
-                    return
-                }
-
-                val moves = ArrayList<StickMove>(movesArr.length())
-                for (i in 0 until movesArr.length()) {
-                    val m = movesArr.getJSONObject(i)
-                    moves.add(
-                        StickMove(
-                            leftX = m.optDouble("leftX", 0.0).toFloat(),
-                            leftY = m.optDouble("leftY", 0.0).toFloat(),
-                            rightX = m.optDouble("rightX", 0.0).toFloat(),
-                            rightY = m.optDouble("rightY", 0.0).toFloat(),
-                            durationMs = m.optLong("durationMs", 800L),
-                            hz = m.optInt("hz", 25)
-                        )
-                    )
-                }
-
-                val defaultHz = payload.optInt("defaultHz", 25)
-
-                // ACK only when sequence completes (requires MoveRunner.runSequence(..., onDone) overload)
-                moveRunner.runSequence(
-                    moves = moves,
-                    defaultHz = defaultHz,
-                    onDone = { ok, err -> ack(ok, err) }
-                )
-            }
-
-            // Keep SNAPSHOT, and optionally support TAKE_PHOTO as alias.
-            "SNAPSHOT", "TAKE_PHOTO" -> {
-                val uploadUrl = payload.optString("upload_url")
-                    .ifBlank { "${pythonBaseUrl.trimEnd('/')}/v1/drone/uploads/photo" }
-
-                if (DroneCommandBridge.mediaFacadeOrNull() == null) {
-                    ack(false, "MediaFacade not bound")
-                    return
-                }
-
-                DroneCommandBridge.takePhotoAndUpload(uploadUrl) { ok, err ->
-                    ack(ok, err)
-                }
-            }
-
             else -> {
+                DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [DISPATCH] Unknown cmd_type=$cmdType")
                 ack(false, "Unknown cmd_type=$cmdType")
             }
         }
+    }
+
+    private fun parseMoves(arr: JSONArray): List<MoveRunner.StickMove> {
+        val out = ArrayList<MoveRunner.StickMove>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val leftX = o.optDouble("leftX", 0.0).toFloat()
+            val leftY = o.optDouble("leftY", 0.0).toFloat()
+            val rightX = o.optDouble("rightX", 0.0).toFloat()
+            val rightY = o.optDouble("rightY", 0.0).toFloat()
+            val dur = o.optLong("durationMs", 500L)
+            val hz = o.optInt("hz", 0)
+            out.add(MoveRunner.StickMove(leftX, leftY, rightX, rightY, dur, hz))
+        }
+        return out
     }
 }

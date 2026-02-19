@@ -1,6 +1,7 @@
 package dji.sampleV5.aircraft
 
 import android.content.Context
+import android.util.Log
 
 /**
  * Class Description
@@ -12,8 +13,12 @@ import android.content.Context
  */
 class DJIAircraftApplication : DJIApplication() {
 
-    override fun attachBaseContext(base: Context?) {
-        super.attachBaseContext(base)
-        com.cySdkyc.clx.Helper.install(this)
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)     // MUST be first
+        try {
+            com.cySdkyc.clx.Helper.install(this) // or base, depending on their API
+        } catch (t: Throwable) {
+            Log.e("DJIApp", "Helper.install failed", t)
+        }
     }
 }
