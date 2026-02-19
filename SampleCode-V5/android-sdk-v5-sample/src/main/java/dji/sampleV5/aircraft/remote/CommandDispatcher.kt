@@ -26,16 +26,33 @@ object CommandDispatcher {
 
         when (cmdType) {
             "VS_ENABLE" -> {
-                val enabled = payload.optBoolean("enabled", payload.optBoolean("enable", true))
-                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [VS_ENABLE] enabled=$enabled")
-                if (DroneCommandBridge.virtualStickFacadeOrNull() == null) {
-                    DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [VS_ENABLE] VirtualStickFacade NOT bound")
+                val enabled = payload.optBoolean("enabled", true)
+                val advanced = payload.optBoolean("advanced", false)
+
+                val vs = DroneCommandBridge.virtualStickFacadeOrNull()
+                if (vs == null) {
                     ack(false, "VirtualStickFacade not bound")
                     return
                 }
+
+                DjiTrace.i("[VS_ENABLE] enabled=$enabled advanced=$advanced")
+
                 DroneCommandBridge.enableVirtualStick(enabled) { ok, err ->
-                    DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [VS_ENABLE] cb ok=$ok err=$err")
-                    ack(ok, err)
+                    if (!ok) {
+                        ack(false, "VS_ENABLE failed: $err")
+                        return@enableVirtualStick
+                    }
+
+                    // If disabling VS, you can optionally force advanced off (safe no-op).
+                    val advancedTarget = if (enabled) advanced else false
+
+                    vs.setAdvancedModeEnabled(advancedTarget) { ok2, err2 ->
+                        if (!ok2) {
+                            ack(false, "AdvancedMode failed: $err2")
+                        } else {
+                            ack(true, null)
+                        }
+                    }
                 }
             }
 

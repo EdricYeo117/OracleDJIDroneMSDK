@@ -25,6 +25,8 @@ import dji.v5.common.error.IDJIError
 import dji.v5.manager.aircraft.virtualstick.Stick
 import dji.v5.utils.common.JsonUtil
 import kotlin.math.abs
+import dji.sampleV5.aircraft.remote.DroneCommandBridge
+import dji.sampleV5.aircraft.remote.DefaultVirtualStickFacade
 
 /**
  * Class Description
@@ -80,6 +82,15 @@ class VirtualStickFragment : DJIFragment() {
         simulatorVM.simulatorStateSb.observe(viewLifecycleOwner) {
             binding?.simulatorStateInfoTv?.text = it
         }
+        DroneCommandBridge.bindVirtualStickFacade(
+            DefaultVirtualStickFacade(virtualStickVM)
+        )
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        DroneCommandBridge.unbindVirtualStickFacade()
+        binding = null
     }
 
     private fun initBtnClickListener() {

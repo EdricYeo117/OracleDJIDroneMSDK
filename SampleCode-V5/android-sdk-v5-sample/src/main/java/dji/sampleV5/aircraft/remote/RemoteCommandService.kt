@@ -8,68 +8,91 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import org.json.JSONObject
 import okhttp3.OkHttpClient
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-
 
 /**
  * Foreground Service that keeps an SSE subscription to the Python server alive.
  *
- * Python -> Android: SSE commands
- * Android -> Python: HTTP ACK + upload (inside MediaFacade)
- *
- * Start this service after SDK is ready / product connected AND after DroneCommandBridge.bind(...)
+ * Also starts the local controller REST server (NanoHTTPD) so intruder-server can call:
+ *  - GET  http://<android_ip>:18080/v1/drone/status
+ *  - POST http://<android_ip>:18080/v1/drone/vs/enable
+ *  - POST http://<android_ip>:18080/v1/drone/vs/moveSequence
+ *  - POST http://<android_ip>:18080/v1/drone/media/photo
  */
 class RemoteCommandService : Service() {
 
     private val moveRunner = MoveRunner()
+
     private var sseClient: SseCommandClient? = null
+    private var httpServer: RemoteHttpServer? = null
+
+    private val controllerPort = 18080
+
+    // OkHttp for SSE: MUST be infinite timeouts
     private val okHttp = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)   // infinite for SSE
-        .callTimeout(0, TimeUnit.MILLISECONDS)   // infinite (prevents “timeout” after N seconds)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
         .retryOnConnectionFailure(true)
         .build()
-    // NEW
-    private val pending: ArrayDeque<JSONObject> = ArrayDeque()
-    @Volatile private var facadesReady: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
 
-        val pythonBaseUrl = try {
-            PythonServerConfigStore.get(this).baseUrl()
-        } catch (t: Throwable) {
-            "http://192.168.1.49:8080"
-        }
-
+        val cfg = PythonServerConfigStore.get(this)
+        val pythonBaseUrl = cfg.baseUrl()
         val deviceId = "android-controller-01"
-        val apiKey: String? = null
+
+// Use the same key for SSE + controller + uploads unless you want separate keys
+        val sseApiKey: String? = cfg.apiKey
+        val controllerApiKey: String? = cfg.apiKey
+
+        // Uncomment for actual drone
+//        DroneCommandBridge.bindMediaFacade(
+//            DefaultMediaFacade(
+//                appContext = applicationContext,
+//                controllerApiKey = controllerApiKey
+//            )
+//        )
+
+        // BIND TEST FACADES so commands invoke methods even without a drone [For TESTING ONLY]
+        DroneCommandBridge.bindVirtualStickFacade(VirtualStickFacadeTest())
+        DroneCommandBridge.bindMediaFacade(
+            MediaFacadeTest(context = applicationContext, controllerApiKey = controllerApiKey)
+        )
 
         startForeground(NOTIF_ID, buildNotification("Connecting to $pythonBaseUrl"))
 
-        // NEW: keep checking readiness in the background
-        startFacadeReadyWatcher()
+        // 1) Start local REST server so intruder-server can connect to 18080
+        startControllerHttpServer(controllerApiKey)
 
+        // 2) Start SSE subscription
         sseClient = SseCommandClient(
             okHttpClient = okHttp,
             baseUrl = pythonBaseUrl,
             deviceId = deviceId,
-            apiKey = apiKey,
+            apiKey = sseApiKey,
             onCommand = { json: JSONObject ->
-                // GATE: queue until facades are bound
-                if (!isFacadesReadyNow()) {
-                    pending.addLast(json)
-                    android.util.Log.w("DJI_CMD", "NOT_READY queue size=${pending.size} cmd=${json.optString("cmd_type")} id=${json.optString("command_id")}")
-                    // Optional: immediately NACK so server can retry later instead of silent queue
-                    // DroneHttpClient.postAck(pythonBaseUrl, deviceId, json.optString("command_id"), ok=false, error="NOT_READY: facades not bound")
+                val cmdType = json.optString("cmd_type")
+                val commandId = json.optString("command_id")
+
+                // STRICT GATE: if facades not bound yet, log + NACK (no queue)
+                val vsOk = DroneCommandBridge.virtualStickFacadeOrNull() != null
+                val mediaOk = DroneCommandBridge.mediaFacadeOrNull() != null
+                val ready = vsOk && mediaOk
+
+                if (!ready) {
+                    DjiTrace.w("[CMD] NOT_READY drop cmd_type=$cmdType command_id=$commandId vs=$vsOk media=$mediaOk")
+
+                    // If you want server-side visibility, NACK it:
+                    // DroneHttpClient.postAck(pythonBaseUrl, deviceId, commandId, ok = false, error = "NOT_READY vs=$vsOk media=$mediaOk")
+
                     return@SseCommandClient
                 }
 
-                // flush anything queued first
-                flushPending(pythonBaseUrl, deviceId)
-
+                DjiTrace.i("[CMD] DISPATCH cmd_type=$cmdType command_id=$commandId")
                 CommandDispatcher.handleCommand(
                     cmd = json,
                     moveRunner = moveRunner,
@@ -81,62 +104,49 @@ class RemoteCommandService : Service() {
                 updateNotification(status)
             }
         ).also { it.start() }
+
+        DjiTrace.i("[RemoteCommandService] started: pythonBaseUrl=$pythonBaseUrl deviceId=$deviceId controllerPort=$controllerPort")
     }
 
-    private fun isFacadesReadyNow(): Boolean {
-        // You’ll need these accessors in DroneCommandBridge (see section 2)
-        val vsOk = DroneCommandBridge.virtualStickFacadeOrNull() != null
-        val mediaOk = DroneCommandBridge.mediaFacadeOrNull() != null
-        val ready = vsOk && mediaOk
+    private fun startControllerHttpServer(controllerApiKey: String?) {
+        if (httpServer != null) return
 
-        if (ready != facadesReady) {
-            facadesReady = ready
-            android.util.Log.i("DJI_CMD", "facadesReady=$facadesReady vs=$vsOk media=$mediaOk pending=${pending.size}")
-        }
-        return ready
-    }
-
-    private fun flushPending(pythonBaseUrl: String, deviceId: String) {
-        if (!isFacadesReadyNow()) return
-        if (pending.isEmpty()) return
-
-        android.util.Log.i("DJI_CMD", "flushing pending=${pending.size}")
-        while (pending.isNotEmpty()) {
-            val cmd = pending.removeFirst()
-            CommandDispatcher.handleCommand(
-                cmd = cmd,
+        try {
+            httpServer = RemoteHttpServer(
+                port = controllerPort,
                 moveRunner = moveRunner,
-                pythonBaseUrl = pythonBaseUrl,
-                deviceId = deviceId
-            )
+                apiKey = controllerApiKey
+            ).also {
+                DjiTrace.i("[HTTP] starting RemoteHttpServer port=$controllerPort apiKey=${if (controllerApiKey.isNullOrBlank()) "none" else "set"}")
+                it.start()
+                DjiTrace.i("[HTTP] started RemoteHttpServer port=$controllerPort ip=${NetworkInfo.getLocalIpv4() ?: "unknown"}")
+            }
+        } catch (t: Throwable) {
+            DjiTrace.e("[HTTP] failed to start RemoteHttpServer port=$controllerPort err=${t.message}", t)
         }
     }
 
-    private fun startFacadeReadyWatcher() {
-        // Periodic poll: minimal change, very reliable.
-        // If you prefer callbacks, do it in DroneCommandBridge; polling is fine for now.
-        val t = Thread {
-            while (isRunning) {
-                try {
-                    val ready = isFacadesReadyNow()
-                    if (ready) {
-                        // If SSE is already connected and commands queued, flushing happens in onCommand.
-                        // This log just helps you see readiness transition in Logcat.
-                    }
-                    Thread.sleep(500)
-                } catch (_: Throwable) {}
-            }
+    private fun stopControllerHttpServer() {
+        try {
+            httpServer?.stop()
+            DjiTrace.i("[HTTP] stopped RemoteHttpServer port=$controllerPort")
+        } catch (t: Throwable) {
+            DjiTrace.e("[HTTP] stop failed err=${t.message}", t)
+        } finally {
+            httpServer = null
         }
-        t.name = "FacadeReadyWatcher"
-        t.isDaemon = true
-        t.start()
     }
 
     override fun onDestroy() {
         sseClient?.stop()
         sseClient = null
+
         moveRunner.stop()
+        stopControllerHttpServer()
+
         isRunning = false
+        DjiTrace.w("[RemoteCommandService] destroyed")
+
         super.onDestroy()
     }
 

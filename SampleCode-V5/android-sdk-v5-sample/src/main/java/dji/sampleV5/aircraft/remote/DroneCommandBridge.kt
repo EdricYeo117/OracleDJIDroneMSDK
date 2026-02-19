@@ -2,10 +2,11 @@ package dji.sampleV5.aircraft.remote
 
 import android.os.Handler
 import android.os.Looper
+import java.util.concurrent.Executors
 
 object DroneCommandBridge {
     private val mainHandler = Handler(Looper.getMainLooper())
-
+    private val mediaIo = Executors.newSingleThreadExecutor()
     @Volatile private var virtualStick: VirtualStickFacade? = null
     @Volatile private var media: MediaFacade? = null
 
@@ -77,8 +78,10 @@ object DroneCommandBridge {
             return
         }
 
-        DjiTrace.i("[BRIDGE] takePhotoAndUpload($uploadUrl) posting to main thread")
-        mainHandler.post {
+//        DjiTrace.i("[BRIDGE] takePhotoAndUpload($uploadUrl) posting to main thread")
+//        mainHandler.post {
+        DjiTrace.i("[BRIDGE] takePhotoAndUpload($uploadUrl) dispatching to media IO thread")
+        mediaIo.execute {
             DjiTrace.i("[BRIDGE] takePhotoAndUpload($uploadUrl) executing on main thread")
             try {
                 m.takePhotoAndUpload(uploadUrl, cb)
