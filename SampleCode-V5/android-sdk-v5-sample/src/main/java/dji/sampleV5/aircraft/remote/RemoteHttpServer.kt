@@ -18,7 +18,7 @@ data class MoveReq(
 )
 
 data class MoveSequenceReq(
-    val moves: List<StickMove>,
+    val moves: List<MoveRunner.StickMove>,
     val defaultHz: Int = 25
 )
 

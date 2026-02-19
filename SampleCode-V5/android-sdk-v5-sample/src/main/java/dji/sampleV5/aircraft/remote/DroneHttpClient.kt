@@ -1,28 +1,14 @@
 package dji.sampleV5.aircraft.remote
 
-import okhttp3.Call
-import okhttp3.Callback
+import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
-import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 object DroneHttpClient {
+    private val client = OkHttpClient()
+    private val jsonType = "application/json; charset=utf-8".toMediaType()
 
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .build()
-
-    private val JSON = "application/json; charset=utf-8".toMediaType()
-
-    /**
-     * Android -> Python API call
-     * POST {pythonBaseUrl}/v1/drone/ack
-     */
     fun postAck(
         pythonBaseUrl: String,
         deviceId: String,
@@ -30,25 +16,32 @@ object DroneHttpClient {
         ok: Boolean,
         error: String?
     ) {
-        if (commandId.isNullOrBlank()) return
+        val url = "${pythonBaseUrl.trimEnd('/')}/v1/drone/ack"
+        val bodyJson = buildString {
+            append("{")
+            append("\"device_id\":\"").append(deviceId).append("\",")
+            append("\"command_id\":").append(if (commandId == null) "null" else "\"$commandId\"").append(",")
+            append("\"ok\":").append(ok)
+            if (error != null) {
+                append(",\"error\":\"").append(error.replace("\"", "\\\"")).append("\"")
+            }
+            append("}")
+        }
 
-        val bodyJson = JSONObject()
-            .put("device_id", deviceId)
-            .put("command_id", commandId)
-            .put("ok", ok)
-            .put("error", error)
+        DjiTrace.i("[ACK] POST url=$url body=$bodyJson")
 
         val req = Request.Builder()
-            .url("${pythonBaseUrl.trimEnd('/')}/v1/drone/ack")
-            .post(bodyJson.toString().toRequestBody(JSON))
+            .url(url)
+            .post(bodyJson.toRequestBody(jsonType))
             .build()
 
         client.newCall(req).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                // optional: Log.e("DroneHttpClient", "ack failed", e)
+                DjiTrace.e("[ACK] FAILED url=${call.request().url} err=${e.message}", e)
             }
 
             override fun onResponse(call: Call, response: Response) {
+                DjiTrace.i("[ACK] OK code=${response.code} url=${call.request().url}")
                 response.close()
             }
         })

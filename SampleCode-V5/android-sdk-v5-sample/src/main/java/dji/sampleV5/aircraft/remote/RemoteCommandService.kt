@@ -9,6 +9,9 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
+
 
 /**
  * Foreground Service that keeps an SSE subscription to the Python server alive.
@@ -22,7 +25,11 @@ class RemoteCommandService : Service() {
 
     private val moveRunner = MoveRunner()
     private var sseClient: SseCommandClient? = null
-
+    private val okHttp = OkHttpClient.Builder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)   // infinite for SSE
+        .callTimeout(0, TimeUnit.MILLISECONDS)   // infinite (prevents “timeout” after N seconds)
+        .retryOnConnectionFailure(true)
+        .build()
     // NEW
     private val pending: ArrayDeque<JSONObject> = ArrayDeque()
     @Volatile private var facadesReady: Boolean = false
@@ -46,6 +53,7 @@ class RemoteCommandService : Service() {
         startFacadeReadyWatcher()
 
         sseClient = SseCommandClient(
+            okHttpClient = okHttp,
             baseUrl = pythonBaseUrl,
             deviceId = deviceId,
             apiKey = apiKey,
