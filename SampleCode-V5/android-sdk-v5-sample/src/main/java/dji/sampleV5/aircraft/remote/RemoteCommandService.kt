@@ -41,20 +41,27 @@ class RemoteCommandService : Service() {
         super.onCreate()
         isRunning = true
 
-        val pythonBaseUrl = try {
-            PythonServerConfigStore.get(this).baseUrl()
-        } catch (t: Throwable) {
-            "http://192.168.1.49:8080"
-        }
-
+        val cfg = PythonServerConfigStore.get(this)
+        val pythonBaseUrl = cfg.baseUrl()
         val deviceId = "android-controller-01"
 
-        // Optional: if you enforce X-API-Key on SSE, set it here
-        val sseApiKey: String? = null
+// Use the same key for SSE + controller + uploads unless you want separate keys
+        val sseApiKey: String? = cfg.apiKey
+        val controllerApiKey: String? = cfg.apiKey
 
-        // Optional: if you enforce X-API-Key on the controller REST server, set it here
-        // (must match intruder-server CONTROLLER_API_KEY if you enable it)
-        val controllerApiKey: String? = null
+        // Uncomment for actual drone
+//        DroneCommandBridge.bindMediaFacade(
+//            DefaultMediaFacade(
+//                appContext = applicationContext,
+//                controllerApiKey = controllerApiKey
+//            )
+//        )
+
+        // BIND TEST FACADES so commands invoke methods even without a drone [For TESTING ONLY]
+        DroneCommandBridge.bindVirtualStickFacade(VirtualStickFacadeTest())
+        DroneCommandBridge.bindMediaFacade(
+            MediaFacadeTest(context = applicationContext, controllerApiKey = controllerApiKey)
+        )
 
         startForeground(NOTIF_ID, buildNotification("Connecting to $pythonBaseUrl"))
 
