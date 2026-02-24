@@ -58,11 +58,12 @@ class RemoteCommandService : Service() {
 //        )
 
         // BIND TEST FACADES so commands invoke methods even without a drone [For TESTING ONLY]
-        DroneCommandBridge.bindVirtualStickFacade(VirtualStickFacadeTest())
         DroneCommandBridge.bindMediaFacade(
-            MediaFacadeTest(context = applicationContext, controllerApiKey = controllerApiKey)
+            DefaultMediaFacade(
+                appContext = applicationContext,
+                controllerApiKey = controllerApiKey
+            )
         )
-
         startForeground(NOTIF_ID, buildNotification("Connecting to $pythonBaseUrl"))
 
         // 1) Start local REST server so intruder-server can connect to 18080

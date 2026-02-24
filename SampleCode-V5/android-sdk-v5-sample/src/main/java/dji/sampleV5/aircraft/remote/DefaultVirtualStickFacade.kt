@@ -14,19 +14,19 @@ class DefaultVirtualStickFacade(
 
     override fun enableVirtualStick(enable: Boolean, cb: (Boolean, String?) -> Unit) {
         val callback = object : CommonCallbacks.CompletionCallback {
-            override fun onSuccess() = cb(true, null)
-            override fun onFailure(error: IDJIError) = cb(false, errorString(error))
-        }
+            override fun onSuccess() {
+                DjiTrace.i("[VS] enableVirtualStick($enable) SUCCESS")
+                cb(true, null)
+            }
 
-        // Ensure DJI calls happen on main thread
-        main.post {
-            try {
-                if (enable) vm.enableVirtualStick(callback)
-                else vm.disableVirtualStick(callback)
-            } catch (t: Throwable) {
-                cb(false, t.message ?: "enableVirtualStick failed")
+            override fun onFailure(error: IDJIError) {
+                val msg = error.toString()
+                DjiTrace.e("[VS] enableVirtualStick($enable) FAIL $msg", null)
+                cb(false, msg)
             }
         }
+
+        if (enable) vm.enableVirtualStick(callback) else vm.disableVirtualStick(callback)
     }
 
     override fun setAdvancedModeEnabled(enabled: Boolean, cb: (Boolean, String?) -> Unit) {

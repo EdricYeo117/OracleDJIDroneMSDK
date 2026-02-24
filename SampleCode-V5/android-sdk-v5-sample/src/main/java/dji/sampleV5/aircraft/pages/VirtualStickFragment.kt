@@ -14,6 +14,7 @@ import dji.sampleV5.aircraft.keyvalue.KeyValueDialogUtil
 import dji.sampleV5.aircraft.models.BasicAircraftControlVM
 import dji.sampleV5.aircraft.models.SimulatorVM
 import dji.sampleV5.aircraft.models.VirtualStickVM
+import dji.sampleV5.aircraft.remote.DefaultAircraftControlFacade
 import dji.sampleV5.aircraft.util.Helper
 import dji.sampleV5.aircraft.util.ToastUtils
 import dji.sampleV5.aircraft.virtualstick.OnScreenJoystick
@@ -85,11 +86,17 @@ class VirtualStickFragment : DJIFragment() {
         DroneCommandBridge.bindVirtualStickFacade(
             DefaultVirtualStickFacade(virtualStickVM)
         )
+        DroneCommandBridge.bindAircraftControlFacade(
+            DefaultAircraftControlFacade(
+                basicAircraftControlVM
+            )
+        )
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         DroneCommandBridge.unbindVirtualStickFacade()
+        DroneCommandBridge.unbindAircraftControlFacade()
         binding = null
     }
 

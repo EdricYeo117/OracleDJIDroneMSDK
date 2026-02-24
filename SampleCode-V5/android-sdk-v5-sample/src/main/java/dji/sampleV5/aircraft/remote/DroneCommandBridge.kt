@@ -9,6 +9,7 @@ object DroneCommandBridge {
     private val mediaIo = Executors.newSingleThreadExecutor()
     @Volatile private var virtualStick: VirtualStickFacade? = null
     @Volatile private var media: MediaFacade? = null
+    @Volatile private var aircraft: AircraftControlFacade? = null
 
     fun bindVirtualStickFacade(facade: VirtualStickFacade) {
         virtualStick = facade
@@ -91,4 +92,29 @@ object DroneCommandBridge {
             }
         }
     }
+
+    // Aircraft Control
+    fun bindAircraftControlFacade(facade: AircraftControlFacade) {
+        aircraft = facade
+        DjiTrace.i("[BRIDGE] bindAircraftControlFacade OK")
+    }
+
+    fun unbindAircraftControlFacade() {
+        aircraft = null
+        DjiTrace.w("[BRIDGE] unbindAircraftControlFacade")
+    }
+
+    fun takeOff(cb: (Boolean, String?) -> Unit) {
+        val a = aircraft
+        if (a == null) {
+            cb(false, "AircraftControlFacade not bound")
+            return
+        }
+        DjiTrace.i("[BRIDGE] takeOff() posting to main thread")
+        mainHandler.post {
+            try { a.takeOff(cb) } catch (t: Throwable) { cb(false, t.toString()) }
+        }
+    }
+
+    fun land(cb: (Boolean, String?) -> Unit) { /* same pattern */ }
 }
