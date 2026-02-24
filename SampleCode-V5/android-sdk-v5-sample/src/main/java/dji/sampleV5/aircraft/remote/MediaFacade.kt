@@ -33,13 +33,13 @@ interface MediaFacade {
     /** One frame from live stream -> JPEG -> upload */
     fun snapshotFrameAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 
-    /** Start recording to aircraft storage (SD/internal depending on drone settings) */
+    /** Start raw encoded stream recording (H264/H265) using cameraStreamManager (raw elementary stream) */
     fun startVideoRecording(cb: (Boolean, String?) -> Unit)
 
     /** Stop recording */
     fun stopVideoRecording(cb: (Boolean, String?) -> Unit)
 
-    /** Stop recording -> download newest MP4/MOV -> upload (requires server endpoint that accepts large files) */
+    /** Stop raw stream recording and upload the local raw stream file */
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 }
 
@@ -49,6 +49,14 @@ class DefaultMediaFacade(
 ) : MediaFacade {
 
     private val io = Executors.newSingleThreadExecutor()
+    @Volatile private var rawVideoRecorder: RawVideoRecorderSession? = null
+
+    private data class RawVideoRecorderSession(
+        val listener: ICameraStreamManager.ReceiveStreamListener,
+        val outputFile: File,
+        val stream: FileOutputStream,
+        @Volatile var bytesWritten: Long = 0L
+    )
 
     // -------------------------
     // Public API
@@ -108,13 +116,39 @@ class DefaultMediaFacade(
     override fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                val km = KeyManager.getInstance()
-                if (km == null) {
-                    cb(false, "KeyManager not available")
+                if (rawVideoRecorder != null) {
+                    cb(false, "Raw video recording already running")
                     return@execute
                 }
-                val ok = startRecordVideo(km, ComponentIndexType.LEFT_OR_MAIN, timeoutSec = 8)
-                cb(ok, if (ok) null else "startVideoRecording failed")
+
+                val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
+                val streamManager = MediaDataCenter.getInstance().cameraStreamManager
+                val outDir = File(appContext.getExternalFilesDir(null), "drone_stream_videos").apply { mkdirs() }
+                val outFile = File(outDir, "DJI_STREAM_${System.currentTimeMillis()}.h26x")
+                val outStream = FileOutputStream(outFile)
+
+                val listener = ICameraStreamManager.ReceiveStreamListener { data, offset, length, info ->
+                    try {
+                        val session = rawVideoRecorder ?: return@ReceiveStreamListener
+                        if (session.stream != outStream) return@ReceiveStreamListener
+                        if (session.bytesWritten == 0L) {
+                            DjiTrace.i("[MEDIA] raw stream codec=${info.mimeType.name} writing raw elementary stream to ${session.outputFile.name}")
+                        }
+                        session.stream.write(data, offset, length)
+                        session.bytesWritten += length.toLong()
+                    } catch (t: Throwable) {
+                        DjiTrace.e("[MEDIA] raw stream write failed: ${t.message}", t)
+                    }
+                }
+
+                rawVideoRecorder = RawVideoRecorderSession(
+                    listener = listener,
+                    outputFile = outFile,
+                    stream = outStream
+                )
+                streamManager.addReceiveStreamListener(cameraIndex, listener)
+                DjiTrace.i("[MEDIA] raw stream recording started file=${outFile.absolutePath}")
+                cb(true, null)
             } catch (t: Throwable) {
                 cb(false, t.toString())
             }
@@ -124,13 +158,13 @@ class DefaultMediaFacade(
     override fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                val km = KeyManager.getInstance()
-                if (km == null) {
-                    cb(false, "KeyManager not available")
+                val session = rawVideoRecorder
+                if (session == null) {
+                    cb(false, "Raw video recording is not running")
                     return@execute
                 }
-                val ok = stopRecordVideo(km, ComponentIndexType.LEFT_OR_MAIN, timeoutSec = 8)
-                cb(ok, if (ok) null else "stopVideoRecording failed")
+                stopRawVideoSession(session)
+                cb(true, null)
             } catch (t: Throwable) {
                 cb(false, t.toString())
             }
@@ -141,28 +175,15 @@ class DefaultMediaFacade(
         DjiTrace.i("[MEDIA] stopVideoRecordingAndUpload uploadUrl=$uploadUrl")
         io.execute {
             try {
-                val km = KeyManager.getInstance()
-                if (km == null) {
-                    cb(false, "KeyManager not available")
+                val session = rawVideoRecorder
+                if (session == null) {
+                    cb(false, "Raw video recording is not running")
                     return@execute
                 }
 
-                val stopped = stopRecordVideo(km, ComponentIndexType.LEFT_OR_MAIN, timeoutSec = 10)
-                if (!stopped) {
-                    cb(false, "stopRecordVideo failed")
-                    return@execute
-                }
-
-                // give camera time to finalize video file
-                try { Thread.sleep(1500) } catch (_: Throwable) {}
-
-                val videoFile = downloadNewestVideoViaMediaManagerWithRetries(
-                    cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
-                    timeoutSec = 60
-                )
-
-                if (videoFile == null || !videoFile.exists() || videoFile.length() <= 0L) {
-                    cb(false, "No video file available to upload")
+                val videoFile = stopRawVideoSession(session)
+                if (videoFile.length() <= 0L) {
+                    cb(false, "Recorded video stream file is empty")
                     return@execute
                 }
 
@@ -172,6 +193,18 @@ class DefaultMediaFacade(
                 cb(false, t.toString())
             }
         }
+    }
+
+    private fun stopRawVideoSession(session: RawVideoRecorderSession): File {
+        MediaDataCenter.getInstance().cameraStreamManager.removeReceiveStreamListener(session.listener)
+        try {
+            session.stream.flush()
+            session.stream.close()
+        } finally {
+            rawVideoRecorder = null
+        }
+        DjiTrace.i("[MEDIA] raw stream recording stopped file=${session.outputFile.absolutePath} bytes=${session.bytesWritten}")
+        return session.outputFile
     }
 
     // -------------------------
