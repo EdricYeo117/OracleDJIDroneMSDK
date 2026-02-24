@@ -137,27 +137,13 @@ object DroneCommandBridge {
     }
 
     // Functions for video
-    fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
+    fun startStreamRecording(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
-            try { m.startVideoRecording(cb) }
-            catch (t: Throwable) { cb(false, t.message ?: "startVideoRecording failed") }
-        }
+        mediaIo.execute { m.startStreamRecording(cb) }
     }
 
-    fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
+    fun stopStreamRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
-            try { m.stopVideoRecording(cb) }
-            catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecording failed") }
-        }
-    }
-
-    fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
-        val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
-            try { m.stopVideoRecordingAndUpload(uploadUrl, cb) }
-            catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecordingAndUpload failed") }
-        }
+        mediaIo.execute { m.stopStreamRecordingAndUpload(uploadUrl, cb) }
     }
 }

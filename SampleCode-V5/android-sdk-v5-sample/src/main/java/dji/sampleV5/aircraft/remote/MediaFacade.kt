@@ -27,20 +27,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 interface MediaFacade {
-    /** Real DJI shutter photo -> download original -> upload */
     fun takePhotoAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
-
-    /** One frame from live stream -> JPEG -> upload */
     fun snapshotFrameAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 
-    /** Start recording to aircraft storage (SD/internal depending on drone settings) */
-    fun startVideoRecording(cb: (Boolean, String?) -> Unit)
-
-    /** Stop recording */
-    fun stopVideoRecording(cb: (Boolean, String?) -> Unit)
-
-    /** Stop recording -> download newest MP4/MOV -> upload (requires server endpoint that accepts large files) */
-    fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
+    // NEW: Video Stream 2 raw recording
+    fun startStreamRecording(cb: (Boolean, String?) -> Unit)
+    fun stopStreamRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 }
 
 class DefaultMediaFacade(
@@ -49,6 +41,7 @@ class DefaultMediaFacade(
 ) : MediaFacade {
 
     private val io = Executors.newSingleThreadExecutor()
+    private val recorder = Stream2Recorder(appContext)
 
     // -------------------------
     // Public API
@@ -105,70 +98,30 @@ class DefaultMediaFacade(
         }
     }
 
-    override fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
+    override fun startStreamRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                val km = KeyManager.getInstance()
-                if (km == null) {
-                    cb(false, "KeyManager not available")
-                    return@execute
-                }
-                val ok = startRecordVideo(km, ComponentIndexType.LEFT_OR_MAIN, timeoutSec = 8)
-                cb(ok, if (ok) null else "startVideoRecording failed")
+                val (ok, err) = recorder.start(ComponentIndexType.LEFT_OR_MAIN)
+                DjiTrace.i("[STREAM2] start ok=$ok err=$err")
+                cb(ok, err)
             } catch (t: Throwable) {
                 cb(false, t.toString())
             }
         }
     }
 
-    override fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
+    override fun stopStreamRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                val km = KeyManager.getInstance()
-                if (km == null) {
-                    cb(false, "KeyManager not available")
+                val (file, err) = recorder.stopAndGetFile()
+                if (file == null) {
+                    DjiTrace.e("[STREAM2] stop failed err=$err", null as Throwable?)
+                    cb(false, err ?: "stopStreamRecording failed")
                     return@execute
                 }
-                val ok = stopRecordVideo(km, ComponentIndexType.LEFT_OR_MAIN, timeoutSec = 8)
-                cb(ok, if (ok) null else "stopVideoRecording failed")
+                // upload raw bitstream file
+                uploadFile(uploadUrl, file, cb)
             } catch (t: Throwable) {
-                cb(false, t.toString())
-            }
-        }
-    }
-
-    override fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
-        DjiTrace.i("[MEDIA] stopVideoRecordingAndUpload uploadUrl=$uploadUrl")
-        io.execute {
-            try {
-                val km = KeyManager.getInstance()
-                if (km == null) {
-                    cb(false, "KeyManager not available")
-                    return@execute
-                }
-
-                val stopped = stopRecordVideo(km, ComponentIndexType.LEFT_OR_MAIN, timeoutSec = 10)
-                if (!stopped) {
-                    cb(false, "stopRecordVideo failed")
-                    return@execute
-                }
-
-                // give camera time to finalize video file
-                try { Thread.sleep(1500) } catch (_: Throwable) {}
-
-                val videoFile = downloadNewestVideoViaMediaManagerWithRetries(
-                    cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
-                    timeoutSec = 60
-                )
-
-                if (videoFile == null || !videoFile.exists() || videoFile.length() <= 0L) {
-                    cb(false, "No video file available to upload")
-                    return@execute
-                }
-
-                uploadFile(uploadUrl, videoFile, cb)
-            } catch (t: Throwable) {
-                DjiTrace.e("[MEDIA] stopVideoRecordingAndUpload crashed err=$t", t)
                 cb(false, t.toString())
             }
         }
@@ -396,196 +349,6 @@ class DefaultMediaFacade(
             })
             disableLatch.await(4, TimeUnit.SECONDS)
         }
-    }
-
-    // -------------------------
-    // VIDEO: start/stop + download latest MP4
-    // -------------------------
-
-    private fun startRecordVideo(
-        km: dji.v5.manager.interfaces.IKeyManager,
-        cameraIndex: ComponentIndexType,
-        timeoutSec: Long
-    ): Boolean {
-        // Must be in VIDEO_NORMAL before recording
-        if (!setCameraMode(km, cameraIndex, CameraMode.VIDEO_NORMAL, timeoutSec = 6)) return false
-
-        val latch = CountDownLatch(1)
-        var ok = false
-        var errMsg: String? = null
-
-        // NOTE: use KeyStartRecord (not KeyStartRecordVideo)
-        val actionKey = KeyTools.createCameraKey<EmptyMsg, EmptyMsg>(
-            CameraKey.KeyStartRecord,
-            cameraIndex,
-            CameraLensType.CAMERA_LENS_DEFAULT
-        )
-
-        km.performAction(actionKey, object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
-            override fun onSuccess(t: EmptyMsg?) {
-                ok = true
-                latch.countDown()
-            }
-
-            override fun onFailure(error: IDJIError) {
-                errMsg = "${error.errorCode()} ${error.description()}"
-                latch.countDown()
-            }
-        })
-
-        val done = latch.await(timeoutSec, TimeUnit.SECONDS)
-        if (!done) DjiTrace.e("[MEDIA] startRecord timeout", null as Throwable?)
-        if (!ok) DjiTrace.e("[MEDIA] startRecord failed err=$errMsg", null as Throwable?)
-        return done && ok
-    }
-
-    private fun stopRecordVideo(
-        km: dji.v5.manager.interfaces.IKeyManager,
-        cameraIndex: ComponentIndexType,
-        timeoutSec: Long
-    ): Boolean {
-        val latch = CountDownLatch(1)
-        var ok = false
-        var errMsg: String? = null
-
-        // NOTE: use KeyStopRecord (not KeyStopRecordVideo)
-        val actionKey = KeyTools.createCameraKey<EmptyMsg, EmptyMsg>(
-            CameraKey.KeyStopRecord,
-            cameraIndex,
-            CameraLensType.CAMERA_LENS_DEFAULT
-        )
-
-        km.performAction(actionKey, object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
-            override fun onSuccess(t: EmptyMsg?) {
-                ok = true
-                latch.countDown()
-            }
-
-            override fun onFailure(error: IDJIError) {
-                errMsg = "${error.errorCode()} ${error.description()}"
-                latch.countDown()
-            }
-        })
-
-        val done = latch.await(timeoutSec, TimeUnit.SECONDS)
-        if (!done) DjiTrace.e("[MEDIA] stopRecord timeout", null as Throwable?)
-        if (!ok) DjiTrace.e("[MEDIA] stopRecord failed err=$errMsg", null as Throwable?)
-        return done && ok
-    }
-
-    private fun downloadNewestVideoViaMediaManager(
-        cameraIndex: ComponentIndexType,
-        timeoutSec: Long
-    ): File? {
-        val mediaManager = MediaDataCenter.getInstance().mediaManager
-
-        val enableLatch = CountDownLatch(1)
-        var enableOk = false
-        var enableErr: String? = null
-
-        mediaManager.enable(object : CommonCallbacks.CompletionCallback {
-            override fun onSuccess() {
-                enableOk = true
-                enableLatch.countDown()
-            }
-
-            override fun onFailure(error: IDJIError) {
-                enableErr = "${error.errorCode()} ${error.description()}"
-                enableLatch.countDown()
-            }
-        })
-
-        if (!enableLatch.await(8, TimeUnit.SECONDS) || !enableOk) {
-            DjiTrace.e("[MEDIA] mediaManager.enable failed err=$enableErr", null as Throwable?)
-            return null
-        }
-
-        try {
-            val ds = MediaFileListDataSource.Builder().build()
-            mediaManager.setMediaFileDataSource(ds)
-        } catch (t: Throwable) {
-            DjiTrace.w("[MEDIA] setMediaFileDataSource skipped: ${t.message}")
-        }
-
-        val upToDateLatch = CountDownLatch(1)
-        val stateListener = object : MediaFileListStateListener {
-            override fun onUpdate(mediaFileListState: MediaFileListState) {
-                if (mediaFileListState == MediaFileListState.UP_TO_DATE) {
-                    upToDateLatch.countDown()
-                }
-            }
-        }
-
-        mediaManager.addMediaFileListStateListener(stateListener)
-
-        try {
-            val pullParam = PullMediaFileListParam.Builder()
-                .mediaFileIndex(-1)
-                .build()
-
-            mediaManager.stopPullMediaFileListFromCamera()
-            mediaManager.pullMediaFileListFromCamera(pullParam, object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {}
-                override fun onFailure(error: IDJIError) {
-                    DjiTrace.e(
-                        "[MEDIA] pullMediaFileListFromCamera failed: ${error.errorCode()} ${error.description()}",
-                        null as Throwable?
-                    )
-                    upToDateLatch.countDown()
-                }
-            })
-
-            upToDateLatch.await(timeoutSec, TimeUnit.SECONDS)
-
-            val list = mediaManager.mediaFileListData?.data ?: emptyList()
-
-            // Filter to videos only
-            val videos = list.filter { mf ->
-                val name = (mf.fileName ?: "").lowercase()
-                name.endsWith(".mp4") || name.endsWith(".mov")
-            }
-
-            val newestVideo = videos.maxByOrNull { it.fileIndex }
-            if (newestVideo == null) {
-                DjiTrace.e("[MEDIA] No MP4/MOV in media list (count=${list.size})", null as Throwable?)
-                return null
-            }
-
-            val outDir = File(appContext.getExternalFilesDir(null), "drone_videos").apply { mkdirs() }
-            val outFile = File(outDir, "DJI_VIDEO_${System.currentTimeMillis()}.mp4")
-
-            val dlOk = downloadMediaFileToDisk(newestVideo, outFile, timeoutSec = timeoutSec)
-            if (!dlOk) return null
-
-            if (!isLikelyMp4(outFile)) {
-                DjiTrace.e("[MEDIA] downloaded file failed MP4 'ftyp' check", null as Throwable?)
-                return null
-            }
-
-            return outFile
-        } finally {
-            try { mediaManager.removeMediaFileListStateListener(stateListener) } catch (_: Throwable) {}
-            val disableLatch = CountDownLatch(1)
-            mediaManager.disable(object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() = disableLatch.countDown()
-                override fun onFailure(error: IDJIError) = disableLatch.countDown()
-            })
-            disableLatch.await(4, TimeUnit.SECONDS)
-        }
-    }
-
-    private fun downloadNewestVideoViaMediaManagerWithRetries(
-        cameraIndex: ComponentIndexType,
-        timeoutSec: Long
-    ): File? {
-        val attempts = 3
-        for (i in 1..attempts) {
-            val f = downloadNewestVideoViaMediaManager(cameraIndex, timeoutSec)
-            if (f != null && f.exists() && f.length() > 0 && isLikelyMp4(f)) return f
-            DjiTrace.w("[MEDIA] video download attempt $i/$attempts failed; retrying...")
-            try { Thread.sleep(2500) } catch (_: Throwable) {}
-        }
-        return null
     }
 
     // -------------------------
