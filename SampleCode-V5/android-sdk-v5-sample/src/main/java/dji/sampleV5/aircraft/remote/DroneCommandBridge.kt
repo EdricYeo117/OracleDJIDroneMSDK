@@ -9,6 +9,7 @@ object DroneCommandBridge {
     private val mediaIo = Executors.newSingleThreadExecutor()
     @Volatile private var virtualStick: VirtualStickFacade? = null
     @Volatile private var media: MediaFacade? = null
+    @Volatile private var aircraft: AircraftControlFacade? = null
 
     fun bindVirtualStickFacade(facade: VirtualStickFacade) {
         virtualStick = facade
@@ -89,6 +90,74 @@ object DroneCommandBridge {
                 DjiTrace.e("[BRIDGE] takePhotoAndUpload exception ${t.message}", t)
                 cb(false, t.message ?: "takePhotoAndUpload failed")
             }
+        }
+    }
+
+    // Aircraft Control
+    fun bindAircraftControlFacade(facade: AircraftControlFacade) {
+        aircraft = facade
+        DjiTrace.i("[BRIDGE] bindAircraftControlFacade OK")
+    }
+
+    fun unbindAircraftControlFacade() {
+        aircraft = null
+        DjiTrace.w("[BRIDGE] unbindAircraftControlFacade")
+    }
+
+    fun takeOff(cb: (Boolean, String?) -> Unit) {
+        val a = aircraft
+        if (a == null) {
+            cb(false, "AircraftControlFacade not bound")
+            return
+        }
+        DjiTrace.i("[BRIDGE] takeOff() posting to main thread")
+        mainHandler.post {
+            try { a.takeOff(cb) } catch (t: Throwable) { cb(false, t.toString()) }
+        }
+    }
+
+    fun land(cb: (Boolean, String?) -> Unit) { /* same pattern */ }
+
+    // Function to take images/stream
+    fun snapshotFrameAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
+        val m = media
+        if (m == null) {
+            DjiTrace.w("[BRIDGE] snapshotFrameAndUpload($uploadUrl) -> MediaFacade NOT bound")
+            cb(false, "MediaFacade not bound")
+            return
+        }
+        mediaIo.execute {
+            try {
+                m.snapshotFrameAndUpload(uploadUrl, cb)
+            } catch (t: Throwable) {
+                DjiTrace.e("[BRIDGE] snapshotFrameAndUpload exception ${t.message}", t)
+                cb(false, t.message ?: "snapshotFrameAndUpload failed")
+            }
+        }
+    }
+
+    // Functions for video
+    fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mainHandler.post {
+            try { m.startVideoRecording(cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "startVideoRecording failed") }
+        }
+    }
+
+    fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mainHandler.post {
+            try { m.stopVideoRecording(cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecording failed") }
+        }
+    }
+
+    fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mainHandler.post {
+            try { m.stopVideoRecordingAndUpload(uploadUrl, cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecordingAndUpload failed") }
         }
     }
 }

@@ -29,26 +29,25 @@ object CommandDispatcher {
                 val enabled = payload.optBoolean("enabled", true)
                 val advanced = payload.optBoolean("advanced", false)
 
-                val vs = DroneCommandBridge.virtualStickFacadeOrNull()
-                if (vs == null) {
-                    ack(false, "VirtualStickFacade not bound")
-                    return
-                }
-
-                DjiTrace.i("[VS_ENABLE] enabled=$enabled advanced=$advanced")
-
                 DroneCommandBridge.enableVirtualStick(enabled) { ok, err ->
                     if (!ok) {
-                        ack(false, "VS_ENABLE failed: $err")
+                        ack(false, err)
                         return@enableVirtualStick
                     }
 
-                    // If disabling VS, you can optionally force advanced off (safe no-op).
-                    val advancedTarget = if (enabled) advanced else false
+                    // If disabling, force advanced off (clean)
+                    val advTarget = if (enabled) advanced else false
 
-                    vs.setAdvancedModeEnabled(advancedTarget) { ok2, err2 ->
+                    val vs = DroneCommandBridge.virtualStickFacadeOrNull()
+                    if (vs == null) {
+                        ack(false, "VirtualStickFacade not bound after enable")
+                        return@enableVirtualStick
+                    }
+
+                    DjiTrace.i("[VS_ENABLE] setAdvancedModeEnabled($advTarget)")
+                    vs.setAdvancedModeEnabled(advTarget) { ok2, err2 ->
                         if (!ok2) {
-                            ack(false, "AdvancedMode failed: $err2")
+                            ack(false, err2 ?: "setAdvancedModeEnabled failed")
                         } else {
                             ack(true, null)
                         }
@@ -98,7 +97,48 @@ object CommandDispatcher {
                 moveRunner.stop()
                 ack(true, null)
             }
+            "TAKEOFF" -> {
+                DroneCommandBridge.takeOff { ok, err ->
+                    DjiTrace.i("[TAKEOFF] cb ok=$ok err=$err")
+                    ack(ok, err)
+                }
+            }
+            "FRAME_SNAPSHOT" -> {
+                val uploadUrl = payload.optString("uploadUrl").ifBlank { payload.optString("upload_url") }
+                    .ifBlank { "${pythonBaseUrl.trimEnd('/')}/v1/drone/uploads/photo" }
 
+                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [FRAME_SNAPSHOT] uploadUrl=$uploadUrl")
+                DroneCommandBridge.snapshotFrameAndUpload(uploadUrl) { ok, err ->
+                    DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [FRAME_SNAPSHOT] cb ok=$ok err=$err")
+                    ack(ok, err)
+                }
+            }
+
+            "VIDEO_START" -> {
+                if (DroneCommandBridge.mediaFacadeOrNull() == null) {
+                    ack(false, "MediaFacade not bound"); return
+                }
+                DroneCommandBridge.startVideoRecording { ok, err -> ack(ok, err) }
+            }
+
+            "VIDEO_STOP" -> {
+                if (DroneCommandBridge.mediaFacadeOrNull() == null) {
+                    ack(false, "MediaFacade not bound"); return
+                }
+                DroneCommandBridge.stopVideoRecording { ok, err -> ack(ok, err) }
+            }
+
+            "VIDEO_STOP_AND_UPLOAD" -> {
+                val uploadUrl = payload.optString("upload_url")
+                    .ifBlank { payload.optString("uploadUrl") }
+                    // You must implement /v1/drone/uploads/video server-side if you use this:
+                    .ifBlank { "${pythonBaseUrl.trimEnd('/')}/v1/drone/uploads/video" }
+
+                if (DroneCommandBridge.mediaFacadeOrNull() == null) {
+                    ack(false, "MediaFacade not bound"); return
+                }
+                DroneCommandBridge.stopVideoRecordingAndUpload(uploadUrl) { ok, err -> ack(ok, err) }
+            }
             else -> {
                 DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [DISPATCH] Unknown cmd_type=$cmdType")
                 ack(false, "Unknown cmd_type=$cmdType")
