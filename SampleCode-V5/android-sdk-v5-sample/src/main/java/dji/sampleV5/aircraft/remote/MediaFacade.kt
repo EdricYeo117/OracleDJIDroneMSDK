@@ -116,36 +116,12 @@ class DefaultMediaFacade(
     override fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                if (rawVideoRecorder != null) {
-                    cb(false, "Raw video recording already running")
-                    return@execute
-                }
-
                 val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
-                val streamManager = MediaDataCenter.getInstance().cameraStreamManager
-                val outDir = File(appContext.getExternalFilesDir(null), "drone_stream_videos").apply { mkdirs() }
-                val outFile = File(outDir, "DJI_STREAM_${System.currentTimeMillis()}.h26x")
-                val outStream = FileOutputStream(outFile)
+                val km = KeyManager.getInstance() ?: return@execute cb(false, "KeyManager is null")
 
-                val listener = ICameraStreamManager.ReceiveStreamListener { data, offset, length, _ ->
-                    try {
-                        val session = rawVideoRecorder ?: return@ReceiveStreamListener
-                        if (session.stream != outStream) return@ReceiveStreamListener
-                        session.stream.write(data, offset, length)
-                        session.bytesWritten += length.toLong()
-                    } catch (t: Throwable) {
-                        DjiTrace.e("[MEDIA] raw stream write failed: ${t.message}", t)
-                    }
-                }
-
-                rawVideoRecorder = RawVideoRecorderSession(
-                    listener = listener,
-                    outputFile = outFile,
-                    stream = outStream
-                )
-                streamManager.addReceiveStreamListener(cameraIndex, listener)
-                DjiTrace.i("[MEDIA] raw stream recording started file=${outFile.absolutePath}")
-                cb(true, null)
+                // Start DJI camera recording (writes MP4/MOV on aircraft storage)
+                val ok = startRecordVideo(km, cameraIndex, timeoutSec = 10)
+                cb(ok, if (ok) null else "KeyStartRecord failed")
             } catch (t: Throwable) {
                 cb(false, t.toString())
             }
@@ -155,13 +131,11 @@ class DefaultMediaFacade(
     override fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                val session = rawVideoRecorder
-                if (session == null) {
-                    cb(false, "Raw video recording is not running")
-                    return@execute
-                }
-                stopRawVideoSession(session)
-                cb(true, null)
+                val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
+                val km = KeyManager.getInstance() ?: return@execute cb(false, "KeyManager is null")
+
+                val ok = stopRecordVideo(km, cameraIndex, timeoutSec = 10)
+                cb(ok, if (ok) null else "KeyStopRecord failed")
             } catch (t: Throwable) {
                 cb(false, t.toString())
             }
@@ -169,24 +143,29 @@ class DefaultMediaFacade(
     }
 
     override fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
-        DjiTrace.i("[MEDIA] stopVideoRecordingAndUpload uploadUrl=$uploadUrl")
+        DjiTrace.i("[MEDIA] stopVideoRecordingAndUpload (MP4) uploadUrl=$uploadUrl")
         io.execute {
             try {
-                val session = rawVideoRecorder
-                if (session == null) {
-                    cb(false, "Raw video recording is not running")
-                    return@execute
+                val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
+                val km = KeyManager.getInstance() ?: return@execute cb(false, "KeyManager is null")
+
+                // 1) stop recording (finalize file on drone)
+                val stopOk = stopRecordVideo(km, cameraIndex, timeoutSec = 12)
+                if (!stopOk) return@execute cb(false, "KeyStopRecord failed")
+
+                // give camera time to finalize the MP4 index
+                Thread.sleep(1500)
+
+                // 2) download newest MP4/MOV from aircraft storage using MediaManager
+                val videoFile = downloadNewestVideoViaMediaManagerWithRetries(cameraIndex, timeoutSec = 45)
+                if (videoFile == null || !videoFile.exists() || videoFile.length() <= 0L) {
+                    return@execute cb(false, "No recorded MP4/MOV downloaded (media list empty or download failed)")
                 }
 
-                val videoFile = stopRawVideoSession(session)
-                if (videoFile.length() <= 0L) {
-                    cb(false, "Recorded video stream file is empty")
-                    return@execute
-                }
-
+                // 3) upload
                 uploadFile(uploadUrl, videoFile, cb)
             } catch (t: Throwable) {
-                DjiTrace.e("[MEDIA] stopVideoRecordingAndUpload crashed err=$t", t)
+                DjiTrace.e("[MEDIA] stopVideoRecordingAndUpload(MP4) crashed err=$t", t)
                 cb(false, t.toString())
             }
         }
