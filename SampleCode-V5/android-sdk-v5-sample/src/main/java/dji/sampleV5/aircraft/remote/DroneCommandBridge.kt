@@ -160,4 +160,19 @@ object DroneCommandBridge {
             catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecordingAndUpload failed") }
         }
     }
+    fun startRtmpLiveStream(rtmpUrl: String, cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mainHandler.post {
+            try { m.startRtmpLiveStream(rtmpUrl, cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "startRtmpLiveStream failed") }
+        }
+    }
+
+    fun stopLiveStream(cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mainHandler.post {
+            try { m.stopLiveStream(cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "stopLiveStream failed") }
+        }
+    }
 }

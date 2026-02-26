@@ -25,6 +25,11 @@ import java.io.RandomAccessFile
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import dji.v5.manager.datacenter.livestream.LiveStreamSettings
+import dji.v5.manager.datacenter.livestream.LiveStreamType
+import dji.v5.manager.datacenter.livestream.StreamQuality
+import dji.v5.manager.datacenter.livestream.LiveVideoBitrateMode
+import dji.v5.manager.datacenter.livestream.settings.RtmpSettings
 
 interface MediaFacade {
     /** Real DJI shutter photo -> download original -> upload */
@@ -41,9 +46,15 @@ interface MediaFacade {
 
     /** Stop raw stream recording and upload the locally recorded file */
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
+
+    /** Push live stream to an RTMP ingest server (server receives the stream) */
+    fun startRtmpLiveStream(rtmpUrl: String, cb: (Boolean, String?) -> Unit)
+
+    /** Stop any active live stream (RTMP/RTSP/etc.) */
+    fun stopLiveStream(cb: (Boolean, String?) -> Unit)
 }
 
-class DefaultMediaFacade(
+abstract class DefaultMediaFacade(
     private val appContext: Context,
     private val controllerApiKey: String? = null
 ) : MediaFacade {
@@ -787,6 +798,85 @@ class DefaultMediaFacade(
             raf.readFully(buf)
             val hay = String(buf, Charsets.ISO_8859_1)
             return hay.contains("ftyp")
+        }
+    }
+
+    override fun startRtmpLiveStream(rtmpUrl: String, cb: (Boolean, String?) -> Unit) {
+        DjiTrace.i("[LIVE] startRtmpLiveStream url=$rtmpUrl")
+        io.execute {
+            try {
+                val ls = MediaDataCenter.getInstance().liveStreamManager
+
+                val settings = LiveStreamSettings.Builder()
+                    .setLiveStreamType(LiveStreamType.RTMP)
+                    .setRtmpSettings(RtmpSettings.Builder().setUrl(rtmpUrl).build())
+                    .build()
+
+                fun doStart() {
+                    // MSDK >= 5.8.0
+                    ls.setCameraIndex(ComponentIndexType.LEFT_OR_MAIN)
+                    ls.setLiveStreamSettings(settings)
+                    ls.setLiveStreamQuality(StreamQuality.HD)
+                    ls.setLiveVideoBitrateMode(LiveVideoBitrateMode.AUTO)
+
+                    ls.startStream(object : CommonCallbacks.CompletionCallback {
+                        override fun onSuccess() {
+                            DjiTrace.i("[LIVE] RTMP streaming started")
+                            cb(true, null)
+                        }
+
+                        override fun onFailure(error: IDJIError) {
+                            val msg = "${error.errorCode()} ${error.description()}"
+                            DjiTrace.e("[LIVE] startStream failed: $msg")
+                            cb(false, msg)
+                        }
+                    })
+                }
+
+                if (ls.isStreaming) {
+                    ls.stopStream(object : CommonCallbacks.CompletionCallback {
+                        override fun onSuccess() {
+                            DjiTrace.i("[LIVE] previous stream stopped; starting new")
+                            doStart()
+                        }
+
+                        override fun onFailure(error: IDJIError) {
+                            val msg = "${error.errorCode()} ${error.description()}"
+                            DjiTrace.e("[LIVE] stopStream failed: $msg")
+                            cb(false, msg)
+                        }
+                    })
+                } else {
+                    doStart()
+                }
+            } catch (t: Throwable) {
+                DjiTrace.e("[LIVE] startRtmpLiveStream crashed: $t", t)
+                cb(false, t.toString())
+            }
+        }
+    }
+
+    override fun stopLiveStream(cb: (Boolean, String?) -> Unit) {
+        DjiTrace.i("[LIVE] stopLiveStream")
+        io.execute {
+            try {
+                val ls = MediaDataCenter.getInstance().liveStreamManager
+                ls.stopStream(object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        DjiTrace.i("[LIVE] streaming stopped")
+                        cb(true, null)
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        val msg = "${error.errorCode()} ${error.description()}"
+                        DjiTrace.e("[LIVE] stopStream failed: $msg", null as Throwable?)
+                        cb(false, msg)
+                    }
+                })
+            } catch (t: Throwable) {
+                DjiTrace.e("[LIVE] stopLiveStream crashed: $t", t)
+                cb(false, t.toString())
+            }
         }
     }
 }
