@@ -28,6 +28,12 @@ import dji.v5.utils.common.JsonUtil
 import kotlin.math.abs
 import dji.sampleV5.aircraft.remote.DroneCommandBridge
 import dji.sampleV5.aircraft.remote.DefaultVirtualStickFacade
+import android.graphics.SurfaceTexture
+import android.view.Surface
+import android.view.TextureView
+import dji.sdk.keyvalue.value.common.ComponentIndexType
+import dji.v5.manager.datacenter.MediaDataCenter
+import dji.v5.manager.interfaces.ICameraStreamManager
 
 /**
  * Class Description
@@ -45,6 +51,59 @@ class VirtualStickFragment : DJIFragment() {
     private val mediaVM: MediaVM by activityViewModels()
     private var binding: FragVirtualStickPageBinding? = null
     private val deviation: Double = 0.02
+    private val cameraStreamManager = MediaDataCenter.getInstance().cameraStreamManager
+    private val previewCameraIndex = ComponentIndexType.LEFT_OR_MAIN
+    private val previewScaleType = ICameraStreamManager.ScaleType.CENTER_CROP
+    private var previewSurface: Surface? = null
+
+    // Functions to help camera preview
+    private fun setupCameraPreview() {
+        val tv = binding?.cameraPreviewView ?: return
+
+        tv.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {
+                val surface = Surface(st)
+                previewSurface = surface
+
+                // avoid odd sizes; some pipelines behave better with multiples of 16
+                val w16 = (width / 16) * 16
+                val h16 = (height / 16) * 16
+
+                cameraStreamManager.putCameraStreamSurface(
+                    previewCameraIndex,
+                    surface,
+                    w16,
+                    h16,
+                    previewScaleType
+                )
+            }
+
+            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {
+                previewSurface?.let { surface ->
+                    val w16 = (width / 16) * 16
+                    val h16 = (height / 16) * 16
+                    cameraStreamManager.putCameraStreamSurface(
+                        previewCameraIndex,
+                        surface,
+                        w16,
+                        h16,
+                        previewScaleType
+                    )
+                }
+            }
+
+            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                previewSurface?.let { surface ->
+                    cameraStreamManager.removeCameraStreamSurface(surface)
+                    surface.release()
+                }
+                previewSurface = null
+                return true
+            }
+
+            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -71,6 +130,8 @@ class VirtualStickFragment : DJIFragment() {
         binding?.widgetHorizontalSituationIndicator?.setSimpleModeEnable(false)
         initBtnClickListener()
         initStickListener()
+        // Set up camera preview
+        setupCameraPreview()
 
         virtualStickVM.listenRCStick()
 
@@ -97,6 +158,11 @@ class VirtualStickFragment : DJIFragment() {
         super.onDestroyView()
         DroneCommandBridge.unbindVirtualStickFacade()
         DroneCommandBridge.unbindAircraftControlFacade()
+        previewSurface?.let { surface ->
+            cameraStreamManager.removeCameraStreamSurface(surface)
+            surface.release()
+        }
+        previewSurface = null
         binding = null
     }
 

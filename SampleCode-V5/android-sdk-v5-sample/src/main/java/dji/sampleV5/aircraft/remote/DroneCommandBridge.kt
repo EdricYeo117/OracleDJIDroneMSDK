@@ -2,6 +2,7 @@ package dji.sampleV5.aircraft.remote
 
 import android.os.Handler
 import android.os.Looper
+import dji.sdk.keyvalue.value.common.ComponentIndexType
 import java.util.concurrent.Executors
 
 object DroneCommandBridge {
@@ -160,19 +161,49 @@ object DroneCommandBridge {
             catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecordingAndUpload failed") }
         }
     }
-    fun startRtmpLiveStream(rtmpUrl: String, cb: (Boolean, String?) -> Unit) {
-        val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
-            try { m.startRtmpLiveStream(rtmpUrl, cb) }
-            catch (t: Throwable) { cb(false, t.message ?: "startRtmpLiveStream failed") }
-        }
-    }
 
     fun stopLiveStream(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
+        mediaIo.execute {
             try { m.stopLiveStream(cb) }
             catch (t: Throwable) { cb(false, t.message ?: "stopLiveStream failed") }
         }
+    }
+
+    fun startRtmpLiveStreamWithRetry(
+        rtmpUrl: String,
+        cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
+        cb: (Boolean, String?) -> Unit
+    ) {
+        val media = mediaFacadeOrNull() ?: return cb(false, "MediaFacade not bound")
+
+        val delays = longArrayOf(0, 500, 1000, 2000, 3000)
+        fun attempt(i: Int) {
+            if (i >= delays.size) return cb(false, "Failed to start livestream after retries")
+
+            mediaIo.execute {
+                if (delays[i] > 0) Thread.sleep(delays[i])
+
+                media.startRtmpLiveStreamAndAwait(
+                    rtmpUrl = rtmpUrl,
+                    cameraIndex = cameraIndex,
+                    timeoutMs = 15_000
+                ) { ok, err ->
+                    if (ok) cb(true, null)
+                    else {
+                        // retry only on the NOT_READY family
+                        val retryable = (err?.contains("LIVE_STREAM_IS_NOT_READY") == true)
+                        if (retryable) {
+                            DjiTrace.w("[LIVE] retrying start (attempt=${i + 1}) err=$err")
+                            media.stopLiveStream { _, _ -> attempt(i + 1) }  // best-effort reset
+                        } else {
+                            cb(false, err)
+                        }
+                    }
+                }
+            }
+        }
+
+        attempt(0)
     }
 }

@@ -114,6 +114,18 @@
         </androidx.constraintlayout.widget.ConstraintLayout>
     </androidx.core.widget.NestedScrollView>
 
+    <TextureView
+        android:id="@+id/camera_preview_view"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:keepScreenOn="true"
+        android:clickable="false"
+        android:focusable="false"
+        app:layout_constraintStart_toEndOf="@id/stick_button_list"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
     <TextView
         android:id="@+id/virtual_stick_info_tv"
         android:layout_width="@dimen/uxsdk_500_dp"

@@ -141,26 +141,16 @@ object CommandDispatcher {
             }
             "LIVESTREAM_START" -> {
                 val rtmpUrl = payload.optString("rtmp_url")
-                    .ifBlank { payload.optString("rtmpUrl") }
+                if (rtmpUrl.isBlank()) { ack(false, "Missing payload.rtmp_url"); return }
 
-                if (rtmpUrl.isBlank()) {
-                    ack(false, "Missing payload.rtmp_url")
-                    return
+                DroneCommandBridge.startRtmpLiveStreamWithRetry(rtmpUrl) { ok, err ->
+                    ack(ok, err)
                 }
-                if (DroneCommandBridge.mediaFacadeOrNull() == null) {
-                    ack(false, "MediaFacade not bound")
-                    return
-                }
-
-                DroneCommandBridge.startRtmpLiveStream(rtmpUrl) { ok, err -> ack(ok, err) }
             }
 
             "LIVESTREAM_STOP" -> {
-                if (DroneCommandBridge.mediaFacadeOrNull() == null) {
-                    ack(false, "MediaFacade not bound")
-                    return
-                }
-                DroneCommandBridge.stopLiveStream { ok, err -> ack(ok, err) }
+                DroneCommandBridge.mediaFacadeOrNull()?.stopLiveStream { ok, err -> ack(ok, err) }
+                    ?: ack(false, "MediaFacade not bound")
             }
             else -> {
                 DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [DISPATCH] Unknown cmd_type=$cmdType")
