@@ -57,7 +57,6 @@ interface MediaFacade {
         timeoutMs: Long = 15_000,
         cb: (Boolean, String?) -> Unit
     )
-
     /** Stop any active live stream (RTMP/RTSP/etc.) */
     fun stopLiveStream(cb: (Boolean, String?) -> Unit)
 }
@@ -818,6 +817,16 @@ class DefaultMediaFacade(
         DjiTrace.i("[LIVE] startRtmpLiveStreamAndAwait url=$rtmpUrl cameraIndex=$cameraIndex timeoutMs=$timeoutMs")
 
         io.execute {
+            // 0) normalize URL (ensure it includes stream name)
+            val url = rtmpUrl.trim()
+            val normalizedUrl =
+                if (url.matches(Regex("^rtmp://.*/live/?$"))) {
+                    // if someone sends only rtmp://host/live, append device stream key
+                    // (or pass it in explicitly)
+                    url.trimEnd('/') + "/android-controller-01"
+                } else {
+                    url
+                }
             val done = AtomicBoolean(false)
             fun finish(ok: Boolean, err: String?) {
                 if (done.compareAndSet(false, true)) cb(ok, err)
@@ -858,7 +867,7 @@ class DefaultMediaFacade(
 
                 val settings = LiveStreamSettings.Builder()
                     .setLiveStreamType(LiveStreamType.RTMP)
-                    .setRtmpSettings(RtmpSettings.Builder().setUrl(rtmpUrl).build())
+                    .setRtmpSettings(RtmpSettings.Builder().setUrl(normalizedUrl).build())
                     .build()
 
                 // Use the same property-set approach your LiveStreamVM uses
@@ -866,7 +875,19 @@ class DefaultMediaFacade(
                 ls.liveStreamSettings = settings
                 ls.liveStreamQuality = StreamQuality.HD
                 ls.liveVideoBitrateMode = LiveVideoBitrateMode.AUTO
-
+                // 1) ensure camera is in VIDEO mode (helps ensure encoder pipeline is active)
+                val km = KeyManager.getInstance()
+                if (km != null) {
+                    setCameraMode(km, cameraIndex, CameraMode.VIDEO_NORMAL, timeoutSec = 6)
+                }
+                // 2) stop any old stream (best-effort)
+                try {
+                    ls.stopStream(object : CommonCallbacks.CompletionCallback {
+                        override fun onSuccess() {}
+                        override fun onFailure(error: IDJIError) {}
+                    })
+                    Thread.sleep(500)
+                } catch (_: Throwable) {}
                 // Start request. DO NOT ack success here.
                 ls.startStream(object : CommonCallbacks.CompletionCallback {
                     override fun onSuccess() {
@@ -888,7 +909,7 @@ class DefaultMediaFacade(
                     } catch (_: InterruptedException) {}
                     if (done.compareAndSet(false, true)) {
                         ls.removeLiveStreamStatusListener(listener)
-                        finish(false, "Timed out waiting for isStreaming=true (ls.isStreaming=${ls.isStreaming})")
+                        finish(false, "Timed out waiting for live media stats (isStreaming=${ls.isStreaming})")
                     }
                 }
             } catch (t: Throwable) {

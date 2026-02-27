@@ -12,10 +12,8 @@
         android:background="@color/white"
         android:orientation="vertical"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintHorizontal_bias="0"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0"
         app:layout_constraintWidth_percent="0.15">
 
         <androidx.constraintlayout.widget.ConstraintLayout
@@ -24,6 +22,7 @@
             android:background="@color/white"
             android:orientation="vertical">
 
+            <!-- buttons unchanged -->
             <Button
                 android:id="@+id/btn_enable_virtual_stick"
                 style="@style/main_fragment_btn"
@@ -72,7 +71,6 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/btn_landing" />
 
-
             <Button
                 android:id="@+id/btn_enable_virtual_stick_advanced_mode"
                 style="@style/main_fragment_btn"
@@ -104,6 +102,7 @@
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/btn_set_virtual_stick_advanced_param" />
+
             <Button
                 android:id="@+id/btn_open_remote_automation"
                 style="@style/main_fragment_btn"
@@ -114,30 +113,23 @@
         </androidx.constraintlayout.widget.ConstraintLayout>
     </androidx.core.widget.NestedScrollView>
 
-    <TextureView
-        android:id="@+id/camera_preview_view"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:keepScreenOn="true"
-        android:clickable="false"
-        android:focusable="false"
-        app:layout_constraintStart_toEndOf="@id/stick_button_list"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent" />
-
+    <!-- Keep your info text at top-left of content area -->
     <TextView
         android:id="@+id/virtual_stick_info_tv"
-        android:layout_width="@dimen/uxsdk_500_dp"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        app:layout_constraintStart_toEndOf="@id/stick_button_list"
-        app:layout_constraintTop_toTopOf="parent"
-        android:textColor="@color/green"
         android:maxLines="30"
+        android:text="virtual info"
+        android:textColor="@color/green"
         android:textSize="10dp"
-        android:text="virtual info">
-    </TextView>
+        app:layout_constraintStart_toEndOf="@id/stick_button_list"
+        app:layout_constraintEnd_toStartOf="@id/video_panel"
+        app:layout_constraintTop_toTopOf="parent"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp" />
 
+    <!-- MAIN CONTENT takes the whole right side (no video as background anymore) -->
     <androidx.fragment.app.FragmentContainerView
         android:id="@+id/remote_feature_container"
         android:layout_width="0dp"
@@ -154,22 +146,43 @@
         android:text="simulator state info:"
         android:textSize="13dp"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-    </TextView>
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- SIDE VIDEO BOX (bounded) -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/video_panel"
+        android:layout_width="260dp"
+        android:layout_height="160dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="6dp"
+        app:cardUseCompatPadding="true"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextureView
+            android:id="@+id/camera_preview_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:keepScreenOn="true"
+            android:clickable="false"
+            android:focusable="false" />
+    </androidx.cardview.widget.CardView>
 
     <dji.sampleV5.aircraft.virtualstick.OnScreenJoystick
         android:id="@+id/left_stick_view"
-        android:background="@mipmap/joystick_bg"
         android:layout_width="140dp"
         android:layout_height="140dp"
+        android:background="@mipmap/joystick_bg"
         app:layout_constraintStart_toEndOf="@+id/stick_button_list"
         app:layout_constraintBottom_toBottomOf="parent" />
 
     <dji.sampleV5.aircraft.virtualstick.OnScreenJoystick
         android:id="@+id/right_stick_view"
-        android:background="@mipmap/joystick_bg"
         android:layout_width="140dp"
         android:layout_height="140dp"
+        android:background="@mipmap/joystick_bg"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toBottomOf="parent" />
 
@@ -177,9 +190,8 @@
         android:id="@+id/widget_horizontal_situation_indicator"
         android:layout_width="350dp"
         android:layout_height="wrap_content"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toEndOf="@+id/stick_button_list"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintVertical_bias="0.8" />
 
