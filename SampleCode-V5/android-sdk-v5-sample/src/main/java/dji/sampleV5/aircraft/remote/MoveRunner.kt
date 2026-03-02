@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `MoveRunner.kt`: contains MoveRunner implementation details.
+ */
+
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -8,6 +12,7 @@ class MoveRunner {
     private var job: Job? = null
     private val moving = AtomicBoolean(false)
 
+    // Handles `stop` behavior for the remote control module.
     fun stop() {
         moving.set(false)
         job?.cancel()
@@ -25,10 +30,12 @@ class MoveRunner {
         val hz: Int = 0
     )
 
+    // Handles `runSequence` behavior for the remote control module.
     fun runSequence(moves: List<StickMove>, defaultHz: Int) {
         runSequence(moves, defaultHz) { _, _ -> }
     }
 
+    // Handles `runSequence` behavior for the remote control module.
     fun runSequence(
         moves: List<StickMove>,
         defaultHz: Int,

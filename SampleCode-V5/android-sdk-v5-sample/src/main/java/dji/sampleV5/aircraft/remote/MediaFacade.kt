@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `MediaFacade.kt`: contains MediaFacade implementation details.
+ */
+
 import android.content.Context
 import android.graphics.Bitmap
 import dji.sdk.keyvalue.key.CameraKey
@@ -53,6 +57,7 @@ interface MediaFacade {
     /** Stop raw stream recording and upload the locally recorded file */
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 
+    // Handles `startLiveFramesUpload` behavior for the remote control module.
     fun startLiveFramesUpload(
         uploadUrl: String,
         fps: Int = 5,
@@ -61,6 +66,7 @@ interface MediaFacade {
         cb: (Boolean, String?) -> Unit
     )
 
+    // Handles `stopLiveFramesUpload` behavior for the remote control module.
     fun stopLiveFramesUpload(cb: (Boolean, String?) -> Unit)
 
     /** Continuously push stream frames (JPEG) to server for CV (human_analyser) */
@@ -152,6 +158,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `snapshotFrameAndUpload` behavior for the remote control module.
     override fun snapshotFrameAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         DjiTrace.i("[MEDIA] snapshotFrameAndUpload uploadUrl=$uploadUrl")
         io.execute {
@@ -176,6 +183,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `startVideoRecording` behavior for the remote control module.
     override fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
@@ -196,6 +204,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `stopVideoRecording` behavior for the remote control module.
     override fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
@@ -222,6 +231,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `stopVideoRecordingAndUpload` behavior for the remote control module.
     override fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         DjiTrace.i("[MEDIA] stopVideoRecordingAndUpload(raw) uploadUrl=$uploadUrl")
         io.execute {
@@ -246,6 +256,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `startRawVideoSession` behavior for the remote control module.
     private fun startRawVideoSession(cameraIndex: ComponentIndexType): RawVideoRecorderSession {
         val mgr = MediaDataCenter.getInstance().cameraStreamManager
 
@@ -259,6 +270,7 @@ class DefaultMediaFacade(
         lateinit var session: RawVideoRecorderSession
 
         val listener = object : ICameraStreamManager.ReceiveStreamListener {
+            // Handles `onReceiveStream` behavior for the remote control module.
             override fun onReceiveStream(data: ByteArray, offset: Int, length: Int, info: StreamInfo) {
                 // First callback: capture mime for logging/diagnostics
                 val mt = session.mime.get()
@@ -294,6 +306,7 @@ class DefaultMediaFacade(
         DjiTrace.i("[MEDIA] raw stream recording started file=${outFile.absolutePath} cameraIndex=$cameraIndex")
         return session
     }
+    // Handles `stopRawVideoSession` behavior for the remote control module.
     private fun stopRawVideoSession(session: RawVideoRecorderSession): File {
         val mgr = MediaDataCenter.getInstance().cameraStreamManager
         try {
@@ -350,6 +363,7 @@ class DefaultMediaFacade(
         return f
     }
 
+    // Handles `startLiveFramePush` behavior for the remote control module.
     override fun startLiveFramePush(
         uploadUrl: String,
         fps: Int,
@@ -377,6 +391,7 @@ class DefaultMediaFacade(
                 lateinit var session: LiveFramePusherSession
 
                 val listener = object : ICameraStreamManager.CameraFrameListener {
+                    // Handles `onFrame` behavior for the remote control module.
                     override fun onFrame(
                         frameData: ByteArray,
                         offset: Int,
@@ -462,6 +477,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `stopLiveFramePush` behavior for the remote control module.
     override fun stopLiveFramePush(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
@@ -501,6 +517,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `startLiveFramesUpload` behavior for the remote control module.
     override fun startLiveFramesUpload(
         uploadUrl: String,
         fps: Int,
@@ -531,6 +548,7 @@ class DefaultMediaFacade(
                 liveLastSentMs = 0L
 
                 val listener = object : ICameraStreamManager.CameraFrameListener {
+                    // Handles `onFrame` behavior for the remote control module.
                     override fun onFrame(
                         frameData: ByteArray,
                         offset: Int,
@@ -610,6 +628,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `stopLiveFramesUpload` behavior for the remote control module.
     override fun stopLiveFramesUpload(cb: (Boolean, String?) -> Unit) {
         DjiTrace.i("[LIVE_FRAMES] stopLiveFramesUpload")
         io.execute {
@@ -656,6 +675,7 @@ class DefaultMediaFacade(
         return downloadNewestPhotoViaMediaManager(cameraIndex, timeoutSec = 30)
     }
 
+    // Handles `setCameraMode` behavior for the remote control module.
     private fun setCameraMode(
         km: dji.v5.manager.interfaces.IKeyManager,
         cameraIndex: ComponentIndexType,
@@ -673,11 +693,13 @@ class DefaultMediaFacade(
         )
 
         km.setValue(key, mode, object : CommonCallbacks.CompletionCallback {
+            // Handles `onSuccess` behavior for the remote control module.
             override fun onSuccess() {
                 ok = true
                 latch.countDown()
             }
 
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(error: IDJIError) {
                 errMsg = "${error.errorCode()} ${error.description()}"
                 latch.countDown()
@@ -696,6 +718,7 @@ class DefaultMediaFacade(
         return done && ok
     }
 
+    // Handles `startShootPhoto` behavior for the remote control module.
     private fun startShootPhoto(
         km: dji.v5.manager.interfaces.IKeyManager,
         cameraIndex: ComponentIndexType,
@@ -712,11 +735,13 @@ class DefaultMediaFacade(
         )
 
         km.performAction(actionKey, object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
+            // Handles `onSuccess` behavior for the remote control module.
             override fun onSuccess(t: EmptyMsg?) {
                 ok = true
                 latch.countDown()
             }
 
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(error: IDJIError) {
                 errMsg = "${error.errorCode()} ${error.description()}"
                 latch.countDown()
@@ -729,6 +754,7 @@ class DefaultMediaFacade(
         return done && ok
     }
 
+    // Handles `downloadNewestPhotoViaMediaManager` behavior for the remote control module.
     private fun downloadNewestPhotoViaMediaManager(
         cameraIndex: ComponentIndexType,
         timeoutSec: Long
@@ -741,11 +767,13 @@ class DefaultMediaFacade(
         var enableErr: String? = null
 
         mediaManager.enable(object : CommonCallbacks.CompletionCallback {
+            // Handles `onSuccess` behavior for the remote control module.
             override fun onSuccess() {
                 enableOk = true
                 enableLatch.countDown()
             }
 
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(error: IDJIError) {
                 enableErr = "${error.errorCode()} ${error.description()}"
                 enableLatch.countDown()
@@ -766,6 +794,7 @@ class DefaultMediaFacade(
 
         val upToDateLatch = CountDownLatch(1)
         val stateListener = object : MediaFileListStateListener {
+            // Handles `onUpdate` behavior for the remote control module.
             override fun onUpdate(mediaFileListState: MediaFileListState) {
                 if (mediaFileListState == MediaFileListState.UP_TO_DATE) {
                     upToDateLatch.countDown()
@@ -782,10 +811,12 @@ class DefaultMediaFacade(
 
             mediaManager.stopPullMediaFileListFromCamera()
             mediaManager.pullMediaFileListFromCamera(pullParam, object : CommonCallbacks.CompletionCallback {
+                // Handles `onSuccess` behavior for the remote control module.
                 override fun onSuccess() {
                     // wait for UP_TO_DATE
                 }
 
+                // Handles `onFailure` behavior for the remote control module.
                 override fun onFailure(error: IDJIError) {
                     DjiTrace.e(
                         "[MEDIA] pullMediaFileListFromCamera failed: ${error.errorCode()} ${error.description()}",
@@ -827,7 +858,9 @@ class DefaultMediaFacade(
             try { mediaManager.removeMediaFileListStateListener(stateListener) } catch (_: Throwable) {}
             val disableLatch = CountDownLatch(1)
             mediaManager.disable(object : CommonCallbacks.CompletionCallback {
+                // Handles `onSuccess` behavior for the remote control module.
                 override fun onSuccess() = disableLatch.countDown()
+                // Handles `onFailure` behavior for the remote control module.
                 override fun onFailure(error: IDJIError) = disableLatch.countDown()
             })
             disableLatch.await(4, TimeUnit.SECONDS)
@@ -858,11 +891,13 @@ class DefaultMediaFacade(
         )
 
         km.performAction(actionKey, object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
+            // Handles `onSuccess` behavior for the remote control module.
             override fun onSuccess(t: EmptyMsg?) {
                 ok = true
                 latch.countDown()
             }
 
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(error: IDJIError) {
                 errMsg = "${error.errorCode()} ${error.description()}"
                 latch.countDown()
@@ -875,6 +910,7 @@ class DefaultMediaFacade(
         return done && ok
     }
 
+    // Handles `stopRecordVideo` behavior for the remote control module.
     private fun stopRecordVideo(
         km: dji.v5.manager.interfaces.IKeyManager,
         cameraIndex: ComponentIndexType,
@@ -892,11 +928,13 @@ class DefaultMediaFacade(
         )
 
         km.performAction(actionKey, object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
+            // Handles `onSuccess` behavior for the remote control module.
             override fun onSuccess(t: EmptyMsg?) {
                 ok = true
                 latch.countDown()
             }
 
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(error: IDJIError) {
                 errMsg = "${error.errorCode()} ${error.description()}"
                 latch.countDown()
@@ -909,6 +947,7 @@ class DefaultMediaFacade(
         return done && ok
     }
 
+    // Handles `downloadNewestVideoViaMediaManager` behavior for the remote control module.
     private fun downloadNewestVideoViaMediaManager(
         cameraIndex: ComponentIndexType,
         timeoutSec: Long
@@ -920,11 +959,13 @@ class DefaultMediaFacade(
         var enableErr: String? = null
 
         mediaManager.enable(object : CommonCallbacks.CompletionCallback {
+            // Handles `onSuccess` behavior for the remote control module.
             override fun onSuccess() {
                 enableOk = true
                 enableLatch.countDown()
             }
 
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(error: IDJIError) {
                 enableErr = "${error.errorCode()} ${error.description()}"
                 enableLatch.countDown()
@@ -945,6 +986,7 @@ class DefaultMediaFacade(
 
         val upToDateLatch = CountDownLatch(1)
         val stateListener = object : MediaFileListStateListener {
+            // Handles `onUpdate` behavior for the remote control module.
             override fun onUpdate(mediaFileListState: MediaFileListState) {
                 if (mediaFileListState == MediaFileListState.UP_TO_DATE) {
                     upToDateLatch.countDown()
@@ -961,7 +1003,9 @@ class DefaultMediaFacade(
 
             mediaManager.stopPullMediaFileListFromCamera()
             mediaManager.pullMediaFileListFromCamera(pullParam, object : CommonCallbacks.CompletionCallback {
+                // Handles `onSuccess` behavior for the remote control module.
                 override fun onSuccess() {}
+                // Handles `onFailure` behavior for the remote control module.
                 override fun onFailure(error: IDJIError) {
                     DjiTrace.e(
                         "[MEDIA] pullMediaFileListFromCamera failed: ${error.errorCode()} ${error.description()}",
@@ -1003,13 +1047,16 @@ class DefaultMediaFacade(
             try { mediaManager.removeMediaFileListStateListener(stateListener) } catch (_: Throwable) {}
             val disableLatch = CountDownLatch(1)
             mediaManager.disable(object : CommonCallbacks.CompletionCallback {
+                // Handles `onSuccess` behavior for the remote control module.
                 override fun onSuccess() = disableLatch.countDown()
+                // Handles `onFailure` behavior for the remote control module.
                 override fun onFailure(error: IDJIError) = disableLatch.countDown()
             })
             disableLatch.await(4, TimeUnit.SECONDS)
         }
     }
 
+    // Handles `downloadNewestVideoViaMediaManagerWithRetries` behavior for the remote control module.
     private fun downloadNewestVideoViaMediaManagerWithRetries(
         cameraIndex: ComponentIndexType,
         timeoutSec: Long
@@ -1041,15 +1088,18 @@ class DefaultMediaFacade(
         val raf = RandomAccessFile(outFile, "rwd")
 
         mediaFile.pullOriginalMediaFileFromCamera(0L, object : MediaFileDownloadListener {
+            // Handles `onStart` behavior for the remote control module.
             override fun onStart() {
                 DjiTrace.i("[MEDIA] download start -> ${outFile.absolutePath}")
             }
 
+            // Handles `onProgress` behavior for the remote control module.
             override fun onProgress(total: Long, current: Long) {
                 if (total > 0) totalBytes = total
                 lastCurrent = current
             }
 
+            // Handles `onRealtimeDataUpdate` behavior for the remote control module.
             override fun onRealtimeDataUpdate(data: ByteArray, position: Long) {
                 try {
                     raf.seek(position)
@@ -1061,11 +1111,13 @@ class DefaultMediaFacade(
                 }
             }
 
+            // Handles `onFinish` behavior for the remote control module.
             override fun onFinish() {
                 ok = true
                 latch.countDown()
             }
 
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(error: IDJIError) {
                 err = "${error.errorCode()} ${error.description()}"
                 latch.countDown()
@@ -1114,6 +1166,7 @@ class DefaultMediaFacade(
         var err: String? = null
 
         val listener = object : ICameraStreamManager.CameraFrameListener {
+            // Handles `onFrame` behavior for the remote control module.
             override fun onFrame(
                 frameData: ByteArray,
                 offset: Int,
@@ -1192,6 +1245,7 @@ class DefaultMediaFacade(
             .maxByOrNull { it.lastModified() }
     }
 
+    // Handles `isLikelyJpeg` behavior for the remote control module.
     private fun isLikelyJpeg(f: File): Boolean {
         if (!f.exists() || f.length() < 4) return false
         RandomAccessFile(f, "r").use { raf ->
@@ -1206,6 +1260,7 @@ class DefaultMediaFacade(
         return true
     }
 
+    // Handles `isLikelyMp4` behavior for the remote control module.
     private fun isLikelyMp4(f: File): Boolean {
         if (!f.exists() || f.length() < 64) return false
         RandomAccessFile(f, "r").use { raf ->
@@ -1217,6 +1272,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `startRtmpLiveStreamAndAwait` behavior for the remote control module.
     override fun startRtmpLiveStreamAndAwait(
         rtmpUrl: String,
         cameraIndex: ComponentIndexType,
@@ -1237,6 +1293,7 @@ class DefaultMediaFacade(
                     url
                 }
             val done = AtomicBoolean(false)
+            // Handles `finish` behavior for the remote control module.
             fun finish(ok: Boolean, err: String?) {
                 if (done.compareAndSet(false, true)) cb(ok, err)
             }
@@ -1244,6 +1301,7 @@ class DefaultMediaFacade(
             val ls = MediaDataCenter.getInstance().liveStreamManager
 
             val listener = object : LiveStreamStatusListener {
+                // Handles `onLiveStreamStatusUpdate` behavior for the remote control module.
                 override fun onLiveStreamStatusUpdate(status: LiveStreamStatus?) {
                     if (status == null) return
 
@@ -1262,6 +1320,7 @@ class DefaultMediaFacade(
                     }
                 }
 
+                // Handles `onError` behavior for the remote control module.
                 override fun onError(error: IDJIError?) {
                     if (error == null) return
                     val msg = "${error.errorCode()} ${error.description()}"
@@ -1292,17 +1351,21 @@ class DefaultMediaFacade(
                 // 2) stop any old stream (best-effort)
                 try {
                     ls.stopStream(object : CommonCallbacks.CompletionCallback {
+                        // Handles `onSuccess` behavior for the remote control module.
                         override fun onSuccess() {}
+                        // Handles `onFailure` behavior for the remote control module.
                         override fun onFailure(error: IDJIError) {}
                     })
                     Thread.sleep(500)
                 } catch (_: Throwable) {}
                 // Start request. DO NOT ack success here.
                 ls.startStream(object : CommonCallbacks.CompletionCallback {
+                    // Handles `onSuccess` behavior for the remote control module.
                     override fun onSuccess() {
                         if (done.get()) return
                         DjiTrace.i("[LIVE] startStream() success; waiting for media stats")
                     }
+                    // Handles `onFailure` behavior for the remote control module.
                     override fun onFailure(error: IDJIError) {
                         if (done.get()) return
                         val msg = "${error.errorCode()} ${error.description()}"
@@ -1328,14 +1391,17 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `stopLiveStream` behavior for the remote control module.
     override fun stopLiveStream(cb: (Boolean, String?) -> Unit) {
         val ls = MediaDataCenter.getInstance().liveStreamManager
         io.execute {
             ls.stopStream(object : CommonCallbacks.CompletionCallback {
+                // Handles `onSuccess` behavior for the remote control module.
                 override fun onSuccess() {
                     DjiTrace.i("[LIVE] stopStream ok")
                     cb(true, null)
                 }
+                // Handles `onFailure` behavior for the remote control module.
                 override fun onFailure(error: IDJIError) {
                     val msg = "${error.errorCode()} ${error.description()}"
                     DjiTrace.e("[LIVE] stopStream failed: $msg")
@@ -1345,6 +1411,7 @@ class DefaultMediaFacade(
         }
     }
 
+    // Handles `rgbaFrameToJpegFile` behavior for the remote control module.
     private fun rgbaFrameToJpegFile(
         frameData: ByteArray,
         offset: Int,

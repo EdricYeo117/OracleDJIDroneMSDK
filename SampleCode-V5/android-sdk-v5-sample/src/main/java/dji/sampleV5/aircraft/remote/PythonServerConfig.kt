@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `PythonServerConfig.kt`: contains PythonServerConfig implementation details.
+ */
+
 import android.content.Context
 import dji.sampleV5.aircraft.R
 
@@ -8,6 +12,7 @@ data class PythonServerConfig(
     val port: Int,
     val apiKey: String? = null
 ) {
+    // Handles `baseUrl` behavior for the remote control module.
     fun baseUrl(): String = "http://$host:$port"
 }
 
@@ -17,6 +22,7 @@ object PythonServerConfigStore {
     private const val KEY_PORT = "port"
     private const val KEY_API_KEY = "api_key"   // NEW
 
+    // Handles `get` behavior for the remote control module.
     fun get(ctx: Context): PythonServerConfig {
         val sp = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 

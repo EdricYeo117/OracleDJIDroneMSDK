@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `MediaFacadeTest.kt`: contains MediaFacadeTest implementation details.
+ */
+
 import android.content.Context
 import java.io.File
 import java.util.concurrent.Executors
@@ -11,6 +15,7 @@ abstract class MediaFacadeTest(
 
     private val io = Executors.newSingleThreadExecutor()
 
+    // Handles `takePhotoAndUpload` behavior for the remote control module.
     override fun takePhotoAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         DjiTrace.i("[MEDIA_TEST] takePhotoAndUpload uploadUrl=$uploadUrl")
         io.execute {
@@ -29,6 +34,7 @@ abstract class MediaFacadeTest(
         }
     }
 
+    // Handles `snapshotFrameAndUpload` behavior for the remote control module.
     override fun snapshotFrameAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         // For test: same dummy behavior
         takePhotoAndUpload(uploadUrl, cb)

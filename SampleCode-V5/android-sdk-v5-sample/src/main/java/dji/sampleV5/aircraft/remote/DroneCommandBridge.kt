@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `DroneCommandBridge.kt`: contains DroneCommandBridge implementation details.
+ */
+
 import android.os.Handler
 import android.os.Looper
 import dji.sdk.keyvalue.value.common.ComponentIndexType
@@ -12,29 +16,36 @@ object DroneCommandBridge {
     @Volatile private var media: MediaFacade? = null
     @Volatile private var aircraft: AircraftControlFacade? = null
 
+    // Handles `bindVirtualStickFacade` behavior for the remote control module.
     fun bindVirtualStickFacade(facade: VirtualStickFacade) {
         virtualStick = facade
         DjiTrace.i("[BRIDGE] bindVirtualStickFacade OK")
     }
 
+    // Handles `unbindVirtualStickFacade` behavior for the remote control module.
     fun unbindVirtualStickFacade() {
         virtualStick = null
         DjiTrace.w("[BRIDGE] unbindVirtualStickFacade")
     }
 
+    // Handles `bindMediaFacade` behavior for the remote control module.
     fun bindMediaFacade(facade: MediaFacade) {
         media = facade
         DjiTrace.i("[BRIDGE] bindMediaFacade OK")
     }
 
+    // Handles `unbindMediaFacade` behavior for the remote control module.
     fun unbindMediaFacade() {
         media = null
         DjiTrace.w("[BRIDGE] unbindMediaFacade")
     }
 
+    // Handles `virtualStickFacadeOrNull` behavior for the remote control module.
     fun virtualStickFacadeOrNull(): VirtualStickFacade? = virtualStick
+    // Handles `mediaFacadeOrNull` behavior for the remote control module.
     fun mediaFacadeOrNull(): MediaFacade? = media
 
+    // Handles `enableVirtualStick` behavior for the remote control module.
     fun enableVirtualStick(enable: Boolean, cb: (Boolean, String?) -> Unit) {
         val vs = virtualStick
         if (vs == null) {
@@ -55,6 +66,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `setStick` behavior for the remote control module.
     fun setStick(leftX: Float, leftY: Float, rightX: Float, rightY: Float) {
         val vs = virtualStick
         if (vs == null) {
@@ -72,6 +84,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `takePhotoAndUpload` behavior for the remote control module.
     fun takePhotoAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         val m = media
         if (m == null) {
@@ -100,11 +113,13 @@ object DroneCommandBridge {
         DjiTrace.i("[BRIDGE] bindAircraftControlFacade OK")
     }
 
+    // Handles `unbindAircraftControlFacade` behavior for the remote control module.
     fun unbindAircraftControlFacade() {
         aircraft = null
         DjiTrace.w("[BRIDGE] unbindAircraftControlFacade")
     }
 
+    // Handles `takeOff` behavior for the remote control module.
     fun takeOff(cb: (Boolean, String?) -> Unit) {
         val a = aircraft
         if (a == null) {
@@ -117,6 +132,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `land` behavior for the remote control module.
     fun land(cb: (Boolean, String?) -> Unit) { /* same pattern */ }
 
     // Function to take images/stream
@@ -146,6 +162,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `stopVideoRecording` behavior for the remote control module.
     fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {
@@ -154,6 +171,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `stopVideoRecordingAndUpload` behavior for the remote control module.
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {
@@ -162,6 +180,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `stopLiveStream` behavior for the remote control module.
     fun stopLiveStream(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {
@@ -170,6 +189,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `startLiveFramePush` behavior for the remote control module.
     fun startLiveFramePush(uploadUrl: String, fps: Int = 5, cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {
@@ -178,6 +198,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `stopLiveFramePush` behavior for the remote control module.
     fun stopLiveFramePush(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {
@@ -186,6 +207,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `startLiveFramesUpload` behavior for the remote control module.
     fun startLiveFramesUpload(uploadUrl: String, fps: Int = 5, cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {
@@ -194,6 +216,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `stopLiveFramesUpload` behavior for the remote control module.
     fun stopLiveFramesUpload(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {
@@ -202,6 +225,7 @@ object DroneCommandBridge {
         }
     }
 
+    // Handles `startRtmpLiveStreamWithRetry` behavior for the remote control module.
     fun startRtmpLiveStreamWithRetry(
         rtmpUrl: String,
         cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
@@ -210,6 +234,7 @@ object DroneCommandBridge {
         val media = mediaFacadeOrNull() ?: return cb(false, "MediaFacade not bound")
 
         val delays = longArrayOf(0, 500, 1000, 2000, 3000)
+        // Handles `attempt` behavior for the remote control module.
         fun attempt(i: Int) {
             if (i >= delays.size) return cb(false, "Failed to start livestream after retries")
 

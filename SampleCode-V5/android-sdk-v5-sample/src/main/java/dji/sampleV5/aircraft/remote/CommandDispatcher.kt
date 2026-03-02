@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `CommandDispatcher.kt`: contains CommandDispatcher implementation details.
+ */
+
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -13,6 +17,7 @@ object CommandDispatcher {
 
         DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [DISPATCH_RX] payload=${DjiTrace.json(payload)} pythonBaseUrl=$pythonBaseUrl deviceId=$deviceId")
 
+        // Handles `ack` behavior for the remote control module.
         fun ack(ok: Boolean, error: String?) {
             DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [ACK->POST] ok=$ok error=$error")
             DroneHttpClient.postAck(
@@ -180,6 +185,7 @@ object CommandDispatcher {
         }
     }
 
+    // Handles `parseMoves` behavior for the remote control module.
     private fun parseMoves(arr: JSONArray): List<MoveRunner.StickMove> {
         val out = ArrayList<MoveRunner.StickMove>(arr.length())
         for (i in 0 until arr.length()) {
