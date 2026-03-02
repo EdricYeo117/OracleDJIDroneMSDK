@@ -186,6 +186,22 @@ object DroneCommandBridge {
         }
     }
 
+    fun startLiveFramesUpload(uploadUrl: String, fps: Int = 5, cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mediaIo.execute {
+            try { m.startLiveFramesUpload(uploadUrl = uploadUrl, fps = fps, cb = cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "startLiveFramesUpload failed") }
+        }
+    }
+
+    fun stopLiveFramesUpload(cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mediaIo.execute {
+            try { m.stopLiveFramesUpload(cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "stopLiveFramesUpload failed") }
+        }
+    }
+
     fun startRtmpLiveStreamWithRetry(
         rtmpUrl: String,
         cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,

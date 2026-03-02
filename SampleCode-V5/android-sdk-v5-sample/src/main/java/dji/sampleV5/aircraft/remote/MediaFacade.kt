@@ -53,6 +53,16 @@ interface MediaFacade {
     /** Stop raw stream recording and upload the locally recorded file */
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 
+    fun startLiveFramesUpload(
+        uploadUrl: String,
+        fps: Int = 5,
+        cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
+        jpegQuality: Int = 75,
+        cb: (Boolean, String?) -> Unit
+    )
+
+    fun stopLiveFramesUpload(cb: (Boolean, String?) -> Unit)
+
     /** Continuously push stream frames (JPEG) to server for CV (human_analyser) */
     fun startLiveFramePush(
         uploadUrl: String,
@@ -81,6 +91,10 @@ class DefaultMediaFacade(
     private val controllerApiKey: String? = null
 ) : MediaFacade {
 
+    @Volatile private var liveFramesRunning = AtomicBoolean(false)
+    @Volatile private var liveFrameListener: ICameraStreamManager.CameraFrameListener? = null
+    @Volatile private var liveInflight = AtomicBoolean(false)
+    @Volatile private var liveLastSentMs: Long = 0L
     private val io = Executors.newSingleThreadExecutor()
     @Volatile private var rawVideoRecorder: RawVideoRecorderSession? = null
 
@@ -484,6 +498,134 @@ class DefaultMediaFacade(
         ) { ok, err ->
             DjiTrace.i("[MEDIA] upload done ok=$ok err=$err")
             cb(ok, err)
+        }
+    }
+
+    override fun startLiveFramesUpload(
+        uploadUrl: String,
+        fps: Int,
+        cameraIndex: ComponentIndexType,
+        jpegQuality: Int,
+        cb: (Boolean, String?) -> Unit
+    ) {
+        DjiTrace.i("[LIVE_FRAMES] startLiveFramesUpload url=$uploadUrl fps=$fps cameraIndex=$cameraIndex q=$jpegQuality")
+
+        io.execute {
+            try {
+                if (liveFramesRunning.get()) {
+                    cb(false, "Live frame upload already running")
+                    return@execute
+                }
+                if (fps <= 0) {
+                    cb(false, "fps must be > 0")
+                    return@execute
+                }
+
+                val mgr = MediaDataCenter.getInstance().cameraStreamManager
+                mgr.setKeepAliveDecoding(true)
+
+                val minIntervalMs = (1000L / fps.toLong()).coerceAtLeast(80L)
+
+                liveFramesRunning.set(true)
+                liveInflight.set(false)
+                liveLastSentMs = 0L
+
+                val listener = object : ICameraStreamManager.CameraFrameListener {
+                    override fun onFrame(
+                        frameData: ByteArray,
+                        offset: Int,
+                        length: Int,
+                        width: Int,
+                        height: Int,
+                        format: ICameraStreamManager.FrameFormat
+                    ) {
+                        if (!liveFramesRunning.get()) return
+                        if (format != ICameraStreamManager.FrameFormat.RGBA_8888) return
+
+                        val expected = width * height * 4
+                        if (length < expected) return
+
+                        val now = System.currentTimeMillis()
+                        if (now - liveLastSentMs < minIntervalMs) return
+
+                        // backpressure: if last upload still running, skip this frame
+                        if (!liveInflight.compareAndSet(false, true)) return
+
+                        liveLastSentMs = now
+
+                        // Do compression + upload off DJI callback thread
+                        io.execute {
+                            try {
+                                if (!liveFramesRunning.get()) {
+                                    liveInflight.set(false)
+                                    return@execute
+                                }
+
+                                val jpgFile = rgbaFrameToJpegFile(
+                                    frameData = frameData,
+                                    offset = offset,
+                                    width = width,
+                                    height = height,
+                                    jpegQuality = jpegQuality
+                                )
+
+                                // optional metadata headers for server-side debug
+                                val headers = mutableMapOf<String, String>()
+                                if (!controllerApiKey.isNullOrBlank()) headers["X-API-Key"] = controllerApiKey
+                                headers["X-Frame-Width"] = width.toString()
+                                headers["X-Frame-Height"] = height.toString()
+                                headers["X-Frame-Ts"] = now.toString()
+
+                                DjiTrace.i("[LIVE_FRAMES] uploading frame bytes=${jpgFile.length()} ${width}x${height}")
+
+                                MultipartUploader.uploadFileAsync(
+                                    uploadUrl = uploadUrl,
+                                    file = jpgFile,
+                                    headers = headers
+                                ) { ok, err ->
+                                    if (!ok) DjiTrace.w("[LIVE_FRAMES] upload failed err=$err")
+                                    else DjiTrace.i("[LIVE_FRAMES] upload ok bytes=${jpgFile.length()}")
+
+                                    try { jpgFile.delete() } catch (_: Throwable) {}
+                                    liveInflight.set(false)
+                                }
+                            } catch (t: Throwable) {
+                                DjiTrace.e("[LIVE_FRAMES] compress/upload crashed: ${t.message}", t)
+                                liveInflight.set(false)
+                            }
+                        }
+                    }
+                }
+
+                liveFrameListener = listener
+                mgr.addFrameListener(cameraIndex, ICameraStreamManager.FrameFormat.RGBA_8888, listener)
+
+                cb(true, null)
+            } catch (t: Throwable) {
+                DjiTrace.e("[LIVE_FRAMES] start failed: ${t.message}", t)
+                liveFramesRunning.set(false)
+                liveInflight.set(false)
+                cb(false, t.toString())
+            }
+        }
+    }
+
+    override fun stopLiveFramesUpload(cb: (Boolean, String?) -> Unit) {
+        DjiTrace.i("[LIVE_FRAMES] stopLiveFramesUpload")
+        io.execute {
+            try {
+                val mgr = MediaDataCenter.getInstance().cameraStreamManager
+                liveFramesRunning.set(false)
+
+                liveFrameListener?.let { l ->
+                    try { mgr.removeFrameListener(l) } catch (_: Throwable) {}
+                }
+                liveFrameListener = null
+                liveInflight.set(false)
+                cb(true, null)
+            } catch (t: Throwable) {
+                cb(false, t.toString())
+            }
         }
     }
 
@@ -1201,5 +1343,38 @@ class DefaultMediaFacade(
                 }
             })
         }
+    }
+
+    private fun rgbaFrameToJpegFile(
+        frameData: ByteArray,
+        offset: Int,
+        width: Int,
+        height: Int,
+        jpegQuality: Int
+    ): File {
+        val expected = width * height * 4
+        val rgba = frameData.copyOfRange(offset, offset + expected)
+
+        val argb = IntArray(width * height)
+        var p = 0
+        var i = 0
+        while (i < argb.size && (p + 3) < rgba.size) {
+            val r = rgba[p].toInt() and 0xFF
+            val g = rgba[p + 1].toInt() and 0xFF
+            val b = rgba[p + 2].toInt() and 0xFF
+            val a = rgba[p + 3].toInt() and 0xFF
+            argb[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            p += 4
+            i++
+        }
+
+        val bmp = Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888)
+        val outDir = File(appContext.getExternalFilesDir(null), "drone_live_frames").apply { mkdirs() }
+        val f = File(outDir, "LIVE_${System.currentTimeMillis()}.jpg")
+
+        FileOutputStream(f).use { os ->
+            bmp.compress(Bitmap.CompressFormat.JPEG, jpegQuality.coerceIn(30, 95), os)
+        }
+        return f
     }
 }

@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CommandDispatcher {
-
+    // 
     fun handleCommand(cmd: JSONObject, moveRunner: MoveRunner, pythonBaseUrl: String, deviceId: String) {
         val cmdType = cmd.optString("cmd_type")
         val commandIdRaw = cmd.optString("command_id")
@@ -156,13 +156,21 @@ object CommandDispatcher {
             "LIVE_FRAMES_START" -> {
                 val uploadUrl = payload.optString("uploadUrl").ifBlank { payload.optString("upload_url") }
                     .ifBlank { "${pythonBaseUrl.trimEnd('/')}/v1/drone/uploads/frame" }
-                val fps = payload.optInt("fps", 5).coerceIn(1, 15)
+                val fps = payload.optInt("fps", 5).coerceIn(1, 10)
 
-                DroneCommandBridge.startLiveFramePush(uploadUrl, fps) { ok, err -> ack(ok, err) }
+                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [LIVE_FRAMES_START] uploadUrl=$uploadUrl fps=$fps")
+                DroneCommandBridge.startLiveFramesUpload(uploadUrl, fps) { ok, err ->
+                    DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [LIVE_FRAMES_START] cb ok=$ok err=$err")
+                    ack(ok, err)
+                }
             }
 
             "LIVE_FRAMES_STOP" -> {
-                DroneCommandBridge.stopLiveFramePush { ok, err -> ack(ok, err) }
+                DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [LIVE_FRAMES_STOP]")
+                DroneCommandBridge.stopLiveFramesUpload { ok, err ->
+                    DjiTrace.i("${DjiTrace.p(cmdType, commandId)} [LIVE_FRAMES_STOP] cb ok=$ok err=$err")
+                    ack(ok, err)
+                }
             }
 
             else -> {
