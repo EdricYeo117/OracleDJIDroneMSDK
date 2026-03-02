@@ -33,6 +33,9 @@ import dji.v5.manager.datacenter.livestream.StreamQuality
 import dji.v5.manager.datacenter.livestream.LiveVideoBitrateMode
 import dji.v5.manager.datacenter.livestream.settings.RtmpSettings
 import java.util.concurrent.atomic.AtomicBoolean
+import dji.v5.manager.datacenter.camera.StreamInfo
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 interface MediaFacade {
     /** Real DJI shutter photo -> download original -> upload */
@@ -49,6 +52,18 @@ interface MediaFacade {
 
     /** Stop raw stream recording and upload the locally recorded file */
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
+
+    /** Continuously push stream frames (JPEG) to server for CV (human_analyser) */
+    fun startLiveFramePush(
+        uploadUrl: String,
+        fps: Int = 5,
+        cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
+        jpegQuality: Int = 75,
+        cb: (Boolean, String?) -> Unit
+    )
+
+    /** Stop continuous frame push */
+    fun stopLiveFramePush(cb: (Boolean, String?) -> Unit)
 
     /** Push live stream to an RTMP ingest server (server receives the stream) */
     fun startRtmpLiveStreamAndAwait(
@@ -70,10 +85,26 @@ class DefaultMediaFacade(
     @Volatile private var rawVideoRecorder: RawVideoRecorderSession? = null
 
     private data class RawVideoRecorderSession(
+        val cameraIndex: ComponentIndexType,
         val listener: ICameraStreamManager.ReceiveStreamListener,
         val outputFile: File,
         val stream: FileOutputStream,
-        @Volatile var bytesWritten: Long = 0L
+        val mime: AtomicReference<ICameraStreamManager.MimeType?> = AtomicReference(null),
+        val bytesWritten: AtomicLong = AtomicLong(0L),
+        val lock: Any = Any()
+    )
+
+    @Volatile private var liveFramePusher: LiveFramePusherSession? = null
+
+    private data class LiveFramePusherSession(
+        val cameraIndex: ComponentIndexType,
+        val listener: ICameraStreamManager.CameraFrameListener,
+        val uploadUrl: String,
+        val minIntervalMs: Long,
+        val jpegQuality: Int,
+        @Volatile var lastSentAtMs: Long = 0L,
+        @Volatile var inflight: Boolean = false,
+        val stop: AtomicBoolean = AtomicBoolean(false)
     )
 
     // -------------------------
@@ -134,13 +165,18 @@ class DefaultMediaFacade(
     override fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
-                val km = KeyManager.getInstance() ?: return@execute cb(false, "KeyManager is null")
+                if (rawVideoRecorder != null) {
+                    cb(false, "Raw stream recording already active")
+                    return@execute
+                }
 
-                // Start DJI camera recording (writes MP4/MOV on aircraft storage)
-                val ok = startRecordVideo(km, cameraIndex, timeoutSec = 10)
-                cb(ok, if (ok) null else "KeyStartRecord failed")
+                val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
+                val session = startRawVideoSession(cameraIndex)
+                rawVideoRecorder = session
+
+                cb(true, null)
             } catch (t: Throwable) {
+                DjiTrace.e("[MEDIA] startVideoRecording(raw) crashed err=$t", t)
                 cb(false, t.toString())
             }
         }
@@ -149,58 +185,289 @@ class DefaultMediaFacade(
     override fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
         io.execute {
             try {
-                val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
-                val km = KeyManager.getInstance() ?: return@execute cb(false, "KeyManager is null")
+                val session = rawVideoRecorder
+                if (session == null) {
+                    cb(false, "No active raw stream recording session")
+                    return@execute
+                }
 
-                val ok = stopRecordVideo(km, cameraIndex, timeoutSec = 10)
-                cb(ok, if (ok) null else "KeyStopRecord failed")
+                val file = stopRawVideoSession(session)
+
+                // If DJI was actually sending H265, you’ll want to name accordingly.
+                // We keep file as-is for now; you can rename based on session.mime if you want.
+                val bytes = file.length()
+                if (bytes <= 0L) {
+                    cb(false, "Raw stream file is empty (no bytes received). Is camera stream active?")
+                } else {
+                    cb(true, null)
+                }
             } catch (t: Throwable) {
+                DjiTrace.e("[MEDIA] stopVideoRecording(raw) crashed err=$t", t)
                 cb(false, t.toString())
             }
         }
     }
 
     override fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
-        DjiTrace.i("[MEDIA] stopVideoRecordingAndUpload (MP4) uploadUrl=$uploadUrl")
+        DjiTrace.i("[MEDIA] stopVideoRecordingAndUpload(raw) uploadUrl=$uploadUrl")
         io.execute {
             try {
-                val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
-                val km = KeyManager.getInstance() ?: return@execute cb(false, "KeyManager is null")
-
-                // 1) stop recording (finalize file on drone)
-                val stopOk = stopRecordVideo(km, cameraIndex, timeoutSec = 12)
-                if (!stopOk) return@execute cb(false, "KeyStopRecord failed")
-
-                // give camera time to finalize the MP4 index
-                Thread.sleep(1500)
-
-                // 2) download newest MP4/MOV from aircraft storage using MediaManager
-                val videoFile = downloadNewestVideoViaMediaManagerWithRetries(cameraIndex, timeoutSec = 45)
-                if (videoFile == null || !videoFile.exists() || videoFile.length() <= 0L) {
-                    return@execute cb(false, "No recorded MP4/MOV downloaded (media list empty or download failed)")
+                val session = rawVideoRecorder
+                if (session == null) {
+                    cb(false, "No active raw stream recording session")
+                    return@execute
                 }
 
-                // 3) upload
-                uploadFile(uploadUrl, videoFile, cb)
+                val file = stopRawVideoSession(session)
+                if (!file.exists() || file.length() <= 0L) {
+                    cb(false, "Raw stream file is empty; nothing to upload")
+                    return@execute
+                }
+
+                uploadFile(uploadUrl, file, cb)
             } catch (t: Throwable) {
-                DjiTrace.e("[MEDIA] stopVideoRecordingAndUpload(MP4) crashed err=$t", t)
+                DjiTrace.e("[MEDIA] stopVideoRecordingAndUpload(raw) crashed err=$t", t)
                 cb(false, t.toString())
             }
         }
     }
 
-    private fun stopRawVideoSession(session: RawVideoRecorderSession): File {
-        MediaDataCenter.getInstance().cameraStreamManager.removeReceiveStreamListener(session.listener)
-        try {
-            session.stream.flush()
-            session.stream.close()
-        } finally {
-            rawVideoRecorder = null
+    private fun startRawVideoSession(cameraIndex: ComponentIndexType): RawVideoRecorderSession {
+        val mgr = MediaDataCenter.getInstance().cameraStreamManager
+
+        // Keep decode alive so first bytes arrive faster (optional but recommended for “test endpoint” usage)
+        mgr.setKeepAliveDecoding(true) // :contentReference[oaicite:1]{index=1}
+
+        val outDir = File(appContext.getExternalFilesDir(null), "drone_raw_stream").apply { mkdirs() }
+        val outFile = File(outDir, "DJI_RAW_${System.currentTimeMillis()}.h264") // default; may actually be h265
+        val fos = FileOutputStream(outFile, false)
+
+        lateinit var session: RawVideoRecorderSession
+
+        val listener = object : ICameraStreamManager.ReceiveStreamListener {
+            override fun onReceiveStream(data: ByteArray, offset: Int, length: Int, info: StreamInfo) {
+                // First callback: capture mime for logging/diagnostics
+                val mt = session.mime.get()
+                if (mt == null) {
+                    val newMt = info.mimeType // StreamInfo.getMimeType() :contentReference[oaicite:2]{index=2}
+                    session.mime.compareAndSet(null, newMt)
+                    DjiTrace.i("[MEDIA] raw stream first packet mime=$newMt ${info.width}x${info.height} fps=${info.frameRate}") // :contentReference[oaicite:3]{index=3}
+                }
+
+                if (length <= 0) return
+
+                synchronized(session.lock) {
+                    try {
+                        session.stream.write(data, offset, length)
+                        session.bytesWritten.addAndGet(length.toLong())
+                    } catch (t: Throwable) {
+                        // If writing fails, stop listener to avoid spamming
+                        DjiTrace.e("[MEDIA] raw stream write failed: ${t.message}", t)
+                        try { mgr.removeReceiveStreamListener(this) } catch (_: Throwable) {}
+                    }
+                }
+            }
         }
-        DjiTrace.i("[MEDIA] raw stream recording stopped file=${session.outputFile.absolutePath} bytes=${session.bytesWritten}")
+
+        session = RawVideoRecorderSession(
+            cameraIndex = cameraIndex,
+            listener = listener,
+            outputFile = outFile,
+            stream = fos
+        )
+
+        mgr.addReceiveStreamListener(cameraIndex, listener) // :contentReference[oaicite:4]{index=4}
+        DjiTrace.i("[MEDIA] raw stream recording started file=${outFile.absolutePath} cameraIndex=$cameraIndex")
+        return session
+    }
+    private fun stopRawVideoSession(session: RawVideoRecorderSession): File {
+        val mgr = MediaDataCenter.getInstance().cameraStreamManager
+        try {
+            mgr.removeReceiveStreamListener(session.listener) // :contentReference[oaicite:5]{index=5}
+        } catch (_: Throwable) {}
+
+        synchronized(session.lock) {
+            try {
+                session.stream.flush()
+            } catch (_: Throwable) {}
+            try {
+                session.stream.close()
+            } catch (_: Throwable) {}
+        }
+
+        rawVideoRecorder = null
+        DjiTrace.i(
+            "[MEDIA] raw stream recording stopped file=${session.outputFile.absolutePath} " +
+                    "bytes=${session.bytesWritten.get()} mime=${session.mime.get()}"
+        )
         return session.outputFile
     }
+    // Converter
+    private fun rgba8888ToJpegFile(
+        frameData: ByteArray,
+        offset: Int,
+        width: Int,
+        height: Int,
+        jpegQuality: Int
+    ): File {
+        val expected = width * height * 4
+        val rgba = frameData.copyOfRange(offset, offset + expected)
 
+        val argb = IntArray(width * height)
+        var p = 0
+        var i = 0
+        while (i < argb.size && (p + 3) < rgba.size) {
+            val r = rgba[p].toInt() and 0xFF
+            val g = rgba[p + 1].toInt() and 0xFF
+            val b = rgba[p + 2].toInt() and 0xFF
+            val a = rgba[p + 3].toInt() and 0xFF
+            argb[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            p += 4
+            i++
+        }
+
+        val bmp = Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888)
+        val outDir = File(appContext.getExternalFilesDir(null), "drone_live_frames").apply { mkdirs() }
+        val f = File(outDir, "FRAME_${System.currentTimeMillis()}.jpg")
+
+        FileOutputStream(f).use { os ->
+            bmp.compress(Bitmap.CompressFormat.JPEG, jpegQuality.coerceIn(30, 95), os)
+        }
+        return f
+    }
+
+    override fun startLiveFramePush(
+        uploadUrl: String,
+        fps: Int,
+        cameraIndex: ComponentIndexType,
+        jpegQuality: Int,
+        cb: (Boolean, String?) -> Unit
+    ) {
+        io.execute {
+            try {
+                if (liveFramePusher != null) {
+                    cb(false, "Live frame push already active")
+                    return@execute
+                }
+                if (fps <= 0) {
+                    cb(false, "fps must be > 0")
+                    return@execute
+                }
+
+                val mgr = MediaDataCenter.getInstance().cameraStreamManager
+                // helps ensure frames arrive quickly even if no UI surface
+                mgr.setKeepAliveDecoding(true)
+
+                val minIntervalMs = (1000L / fps.toLong()).coerceAtLeast(50L)
+
+                lateinit var session: LiveFramePusherSession
+
+                val listener = object : ICameraStreamManager.CameraFrameListener {
+                    override fun onFrame(
+                        frameData: ByteArray,
+                        offset: Int,
+                        length: Int,
+                        width: Int,
+                        height: Int,
+                        format: ICameraStreamManager.FrameFormat
+                    ) {
+                        if (session.stop.get()) return
+                        if (format != ICameraStreamManager.FrameFormat.RGBA_8888) return
+
+                        val expected = width * height * 4
+                        if (length < expected) return
+
+                        val now = System.currentTimeMillis()
+
+                        // throttle FPS
+                        if (now - session.lastSentAtMs < session.minIntervalMs) return
+
+                        // simple backpressure: skip if previous upload still inflight
+                        if (session.inflight) return
+
+                        session.lastSentAtMs = now
+                        session.inflight = true
+
+                        // Do heavy work + network on IO executor (not DJI callback thread)
+                        io.execute {
+                            try {
+                                if (session.stop.get()) return@execute
+
+                                val jpg = rgba8888ToJpegFile(
+                                    frameData = frameData,
+                                    offset = offset,
+                                    width = width,
+                                    height = height,
+                                    jpegQuality = session.jpegQuality
+                                )
+
+                                // Add optional headers for ordering / metadata
+                                val headers = mutableMapOf<String, String>()
+                                if (!controllerApiKey.isNullOrBlank()) headers["X-API-Key"] = controllerApiKey
+                                headers["X-Frame-Width"] = width.toString()
+                                headers["X-Frame-Height"] = height.toString()
+                                headers["X-Frame-Ts"] = now.toString()
+
+                                MultipartUploader.uploadFileAsync(
+                                    uploadUrl = session.uploadUrl,
+                                    file = jpg,
+                                    headers = headers
+                                ) { ok, err ->
+                                    // delete temp frame to avoid storage blowup
+                                    try { jpg.delete() } catch (_: Throwable) {}
+                                    session.inflight = false
+                                    if (!ok) {
+                                        DjiTrace.w("[LIVE_FRAMES] upload failed err=$err")
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                session.inflight = false
+                                DjiTrace.e("[LIVE_FRAMES] frame processing/upload crashed: ${t.message}", t)
+                            }
+                        }
+                    }
+                }
+
+                session = LiveFramePusherSession(
+                    cameraIndex = cameraIndex,
+                    listener = listener,
+                    uploadUrl = uploadUrl,
+                    minIntervalMs = minIntervalMs,
+                    jpegQuality = jpegQuality
+                )
+
+                liveFramePusher = session
+                mgr.addFrameListener(cameraIndex, ICameraStreamManager.FrameFormat.RGBA_8888, listener)
+
+                DjiTrace.i("[LIVE_FRAMES] started uploadUrl=$uploadUrl fps=$fps cameraIndex=$cameraIndex")
+                cb(true, null)
+            } catch (t: Throwable) {
+                DjiTrace.e("[LIVE_FRAMES] start crashed err=$t", t)
+                cb(false, t.toString())
+            }
+        }
+    }
+
+    override fun stopLiveFramePush(cb: (Boolean, String?) -> Unit) {
+        io.execute {
+            try {
+                val session = liveFramePusher ?: run {
+                    cb(false, "No active live frame push session")
+                    return@execute
+                }
+                session.stop.set(true)
+
+                val mgr = MediaDataCenter.getInstance().cameraStreamManager
+                try { mgr.removeFrameListener(session.listener) } catch (_: Throwable) {}
+
+                liveFramePusher = null
+                DjiTrace.i("[LIVE_FRAMES] stopped")
+                cb(true, null)
+            } catch (t: Throwable) {
+                cb(false, t.toString())
+            }
+        }
+    }
     // -------------------------
     // Upload helper
     // -------------------------

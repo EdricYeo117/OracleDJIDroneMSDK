@@ -140,7 +140,7 @@ object DroneCommandBridge {
     // Functions for video
     fun startVideoRecording(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
+        mediaIo.execute {
             try { m.startVideoRecording(cb) }
             catch (t: Throwable) { cb(false, t.message ?: "startVideoRecording failed") }
         }
@@ -148,7 +148,7 @@ object DroneCommandBridge {
 
     fun stopVideoRecording(cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
+        mediaIo.execute {
             try { m.stopVideoRecording(cb) }
             catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecording failed") }
         }
@@ -156,7 +156,7 @@ object DroneCommandBridge {
 
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
-        mainHandler.post {
+        mediaIo.execute {
             try { m.stopVideoRecordingAndUpload(uploadUrl, cb) }
             catch (t: Throwable) { cb(false, t.message ?: "stopVideoRecordingAndUpload failed") }
         }
@@ -167,6 +167,22 @@ object DroneCommandBridge {
         mediaIo.execute {
             try { m.stopLiveStream(cb) }
             catch (t: Throwable) { cb(false, t.message ?: "stopLiveStream failed") }
+        }
+    }
+
+    fun startLiveFramePush(uploadUrl: String, fps: Int = 5, cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mediaIo.execute {
+            try { m.startLiveFramePush(uploadUrl = uploadUrl, fps = fps, cb = cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "startLiveFramePush failed") }
+        }
+    }
+
+    fun stopLiveFramePush(cb: (Boolean, String?) -> Unit) {
+        val m = media ?: return cb(false, "MediaFacade not bound")
+        mediaIo.execute {
+            try { m.stopLiveFramePush(cb) }
+            catch (t: Throwable) { cb(false, t.message ?: "stopLiveFramePush failed") }
         }
     }
 

@@ -152,6 +152,19 @@ object CommandDispatcher {
                 DroneCommandBridge.mediaFacadeOrNull()?.stopLiveStream { ok, err -> ack(ok, err) }
                     ?: ack(false, "MediaFacade not bound")
             }
+
+            "LIVE_FRAMES_START" -> {
+                val uploadUrl = payload.optString("uploadUrl").ifBlank { payload.optString("upload_url") }
+                    .ifBlank { "${pythonBaseUrl.trimEnd('/')}/v1/drone/uploads/frame" }
+                val fps = payload.optInt("fps", 5).coerceIn(1, 15)
+
+                DroneCommandBridge.startLiveFramePush(uploadUrl, fps) { ok, err -> ack(ok, err) }
+            }
+
+            "LIVE_FRAMES_STOP" -> {
+                DroneCommandBridge.stopLiveFramePush { ok, err -> ack(ok, err) }
+            }
+
             else -> {
                 DjiTrace.w("${DjiTrace.p(cmdType, commandId)} [DISPATCH] Unknown cmd_type=$cmdType")
                 ack(false, "Unknown cmd_type=$cmdType")
