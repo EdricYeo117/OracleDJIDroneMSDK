@@ -1,3 +1,7 @@
+/**
+ * Remote module file `SurfaceView.kt`: contains SurfaceView implementation details.
+ */
+
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -13,10 +17,13 @@ private var h = 0
 private val cameraIndex = ComponentIndexType.LEFT_OR_MAIN
 private val scaleType = ICameraStreamManager.ScaleType.CENTER_CROP
 
+// Handles `setupPreview` behavior for the remote control module.
 fun setupPreview(surfaceView: SurfaceView) {
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+        // Handles `surfaceCreated` behavior for the remote control module.
         override fun surfaceCreated(holder: SurfaceHolder) {}
 
+        // Handles `surfaceChanged` behavior for the remote control module.
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             w = width
             h = height
@@ -32,6 +39,7 @@ fun setupPreview(surfaceView: SurfaceView) {
             )
         }
 
+        // Handles `surfaceDestroyed` behavior for the remote control module.
         override fun surfaceDestroyed(holder: SurfaceHolder) {
             cameraStreamManager.removeCameraStreamSurface(holder.surface)
             previewSurface = null

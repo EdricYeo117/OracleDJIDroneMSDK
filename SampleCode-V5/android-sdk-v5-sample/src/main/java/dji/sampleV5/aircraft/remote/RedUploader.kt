@@ -1,6 +1,10 @@
 // File: .../remote/RedUploader.kt  (your file currently defines object MultipartUploader)
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `RedUploader.kt`: contains RedUploader implementation details.
+ */
+
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -39,10 +43,12 @@ object MultipartUploader {
         val req = buildRequest(uploadUrl, file, headers)
 
         client.newCall(req).enqueue(object : Callback {
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(call: Call, e: IOException) {
                 onDone(false, e.toString())
             }
 
+            // Handles `onResponse` behavior for the remote control module.
             override fun onResponse(call: Call, response: Response) {
                 response.use { resp ->
                     if (resp.isSuccessful) {
@@ -56,6 +62,7 @@ object MultipartUploader {
         })
     }
 
+    // Handles `buildRequest` behavior for the remote control module.
     private fun buildRequest(
         uploadUrl: String,
         file: File,
@@ -72,6 +79,7 @@ object MultipartUploader {
         return reqBuilder.build()
     }
 
+    // Handles `guessMediaType` behavior for the remote control module.
     private fun guessMediaType(file: File): String {
         val name = file.name.lowercase()
         return when {

@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote.ui
 
+/**
+ * Remote module file `ui/RemoteControlPanelBinder.kt`: contains RemoteControlPanelBinder implementation details.
+ */
+
 import android.content.Context
 import android.view.View
 import android.widget.Button
@@ -38,12 +42,14 @@ class RemoteControlPanelBinder(
         private const val DEFAULT_PY_PORT = 8080
     }
 
+    // Handles `buildUploadUrl` behavior for the remote control module.
     private fun buildUploadUrl(host: String, port: Int): String {
         val safeHost = host.trim()
         val safePort = port.coerceIn(1, 65535)
         return "http://$safeHost:$safePort$UPLOAD_PATH"
     }
 
+    // Handles `bind` behavior for the remote control module.
     fun bind() {
         // Controller listener (local)
         val ip = NetworkInfo.getLocalIpv4() ?: "Unknown"
@@ -114,10 +120,12 @@ class RemoteControlPanelBinder(
             }
 
             mediaVM.takePhotoThenDownloadThenUpload(url, object : CommonCallbacks.CompletionCallback {
+                // Handles `onSuccess` behavior for the remote control module.
                 override fun onSuccess() {
                     ToastUtils.showToast("Photo uploaded")
                 }
 
+                // Handles `onFailure` behavior for the remote control module.
                 override fun onFailure(error: IDJIError) {
                     ToastUtils.showToast("Upload failed: ${error.description()}")
                 }
@@ -127,6 +135,7 @@ class RemoteControlPanelBinder(
         refreshStatus()
     }
 
+    // Handles `refreshStatus` behavior for the remote control module.
     private fun refreshStatus() {
         val running = RemoteCommandService.isRunning
         val host = etPythonHost.text?.toString()?.trim().orEmpty().ifEmpty { DEFAULT_PY_HOST }

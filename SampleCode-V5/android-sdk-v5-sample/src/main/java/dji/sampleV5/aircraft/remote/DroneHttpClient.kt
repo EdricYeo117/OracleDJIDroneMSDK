@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `DroneHttpClient.kt`: contains DroneHttpClient implementation details.
+ */
+
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -9,6 +13,7 @@ object DroneHttpClient {
     private val client = OkHttpClient()
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
+    // Handles `postAck` behavior for the remote control module.
     fun postAck(
         pythonBaseUrl: String,
         deviceId: String,
@@ -36,10 +41,12 @@ object DroneHttpClient {
             .build()
 
         client.newCall(req).enqueue(object : Callback {
+            // Handles `onFailure` behavior for the remote control module.
             override fun onFailure(call: Call, e: IOException) {
                 DjiTrace.e("[ACK] FAILED url=${call.request().url} err=${e.message}", e)
             }
 
+            // Handles `onResponse` behavior for the remote control module.
             override fun onResponse(call: Call, response: Response) {
                 DjiTrace.i("[ACK] OK code=${response.code} url=${call.request().url}")
                 response.close()

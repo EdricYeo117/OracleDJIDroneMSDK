@@ -1,6 +1,10 @@
 // File: SampleCode-V5/android-sdk-v5-sample/src/main/java/dji/sampleV5/aircraft/remote/RemoteHttpServer.kt
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `RemoteHttpServer.kt`: contains RemoteHttpServer implementation details.
+ */
+
 import com.google.gson.Gson
 import fi.iki.elonen.NanoHTTPD
 import java.util.concurrent.atomic.AtomicBoolean
@@ -45,6 +49,7 @@ class RemoteHttpServer(
 
     private val httpd: NanoHTTPD = object : NanoHTTPD(port) {
 
+        // Handles `enforceApiKey` behavior for the remote control module.
         private fun enforceApiKey(session: IHTTPSession): Response? {
             val expected = apiKey?.trim().orEmpty()
             if (expected.isEmpty()) return null // auth disabled
@@ -55,6 +60,7 @@ class RemoteHttpServer(
                 payload = mapOf("error" to "unauthorized")
             )
         }
+        // Handles `serve` behavior for the remote control module.
         override fun serve(session: IHTTPSession): Response {
             enforceApiKey(session)?.let { return it }
             return try {
@@ -109,25 +115,30 @@ class RemoteHttpServer(
             }
         }
 
+        // Handles `readBody` behavior for the remote control module.
         private fun readBody(session: IHTTPSession): String {
             val files = HashMap<String, String>()
             session.parseBody(files)
             return files["postData"] ?: ""
         }
 
+        // Handles `jsonOk` behavior for the remote control module.
         private fun jsonOk(obj: Any): Response =
             newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(obj))
 
+        // Handles `jsonErr` behavior for the remote control module.
         private fun jsonErr(status: Response.Status, payload: Any): Response =
             newFixedLengthResponse(status, "application/json", gson.toJson(payload))
     }
 
+    // Handles `start` behavior for the remote control module.
     fun start() {
         if (started.compareAndSet(false, true)) {
             httpd.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         }
     }
 
+    // Handles `stop` behavior for the remote control module.
     fun stop() {
         if (started.compareAndSet(true, false)) {
             httpd.stop()

@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `RemoteCommandService.kt`: contains RemoteCommandService implementation details.
+ */
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -37,6 +41,7 @@ class RemoteCommandService : Service() {
         .retryOnConnectionFailure(true)
         .build()
 
+    // Handles `onCreate` behavior for the remote control module.
     override fun onCreate() {
         super.onCreate()
         isRunning = true
@@ -109,6 +114,7 @@ class RemoteCommandService : Service() {
         DjiTrace.i("[RemoteCommandService] started: pythonBaseUrl=$pythonBaseUrl deviceId=$deviceId controllerPort=$controllerPort")
     }
 
+    // Handles `startControllerHttpServer` behavior for the remote control module.
     private fun startControllerHttpServer(controllerApiKey: String?) {
         if (httpServer != null) return
 
@@ -127,6 +133,7 @@ class RemoteCommandService : Service() {
         }
     }
 
+    // Handles `stopControllerHttpServer` behavior for the remote control module.
     private fun stopControllerHttpServer() {
         try {
             httpServer?.stop()
@@ -138,6 +145,7 @@ class RemoteCommandService : Service() {
         }
     }
 
+    // Handles `onDestroy` behavior for the remote control module.
     override fun onDestroy() {
         sseClient?.stop()
         sseClient = null
@@ -151,8 +159,10 @@ class RemoteCommandService : Service() {
         super.onDestroy()
     }
 
+    // Handles `onBind` behavior for the remote control module.
     override fun onBind(intent: Intent?): IBinder? = null
 
+    // Handles `buildNotification` behavior for the remote control module.
     private fun buildNotification(line: String): Notification {
         val channelId = CHANNEL_ID
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -172,6 +182,7 @@ class RemoteCommandService : Service() {
             .build()
     }
 
+    // Handles `updateNotification` behavior for the remote control module.
     private fun updateNotification(line: String) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIF_ID, buildNotification(line))

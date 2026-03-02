@@ -1,5 +1,9 @@
 package dji.sampleV5.aircraft.remote
 
+/**
+ * Remote module file `SseCommandClient.kt`: contains SseCommandClient implementation details.
+ */
+
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -19,6 +23,7 @@ class SseCommandClient(
     @Volatile private var eventSource: okhttp3.sse.EventSource? = null
     @Volatile private var stopping = false
 
+    // Handles `start` behavior for the remote control module.
     fun start() {
         stopping = false
 
@@ -33,11 +38,13 @@ class SseCommandClient(
         eventSource = okhttp3.sse.EventSources.createFactory(okHttpClient)
             .newEventSource(request, object : okhttp3.sse.EventSourceListener() {
 
+                // Handles `onOpen` behavior for the remote control module.
                 override fun onOpen(es: okhttp3.sse.EventSource, response: Response) {
                     DjiTrace.i("[SSE] onOpen code=${response.code}")
                     onStatus("connected")
                 }
 
+                // Handles `onEvent` behavior for the remote control module.
                 override fun onEvent(
                     es: okhttp3.sse.EventSource,
                     id: String?,
@@ -62,6 +69,7 @@ class SseCommandClient(
                 }
             }
 
+                // Handles `onFailure` behavior for the remote control module.
                 override fun onFailure(
                     es: okhttp3.sse.EventSource,
                     t: Throwable?,
@@ -78,6 +86,7 @@ class SseCommandClient(
                     onStatus("error: ${t?.message}")
                 }
 
+                // Handles `onClosed` behavior for the remote control module.
                 override fun onClosed(es: okhttp3.sse.EventSource) {
                     if (stopping) {
                         DjiTrace.i("[SSE] onClosed (client stop)")
@@ -90,6 +99,7 @@ class SseCommandClient(
             })
     }
 
+    // Handles `stop` behavior for the remote control module.
     fun stop() {
         stopping = true
         try {
