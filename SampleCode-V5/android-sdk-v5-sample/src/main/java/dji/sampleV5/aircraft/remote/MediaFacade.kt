@@ -364,6 +364,46 @@ class DefaultMediaFacade(
     }
 
     // Handles `startLiveFramePush` behavior for the remote control module.
+    private fun rgba8888ToDownscaledJpegFile(
+        frameData: ByteArray,
+        offset: Int,
+        width: Int,
+        height: Int,
+        jpegQuality: Int,
+        maxWidth: Int = 640
+    ): File {
+        val expected = width * height * 4
+        val rgba = frameData.copyOfRange(offset, offset + expected)
+
+        val argb = IntArray(width * height)
+        var p = 0
+        var i = 0
+        while (i < argb.size && (p + 3) < rgba.size) {
+            val r = rgba[p].toInt() and 0xFF
+            val g = rgba[p + 1].toInt() and 0xFF
+            val b = rgba[p + 2].toInt() and 0xFF
+            val a = rgba[p + 3].toInt() and 0xFF
+            argb[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            p += 4
+            i++
+        }
+
+        val bmp = Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888)
+
+        val scaled = if (bmp.width > maxWidth) {
+            val newH = (bmp.height * (maxWidth.toFloat() / bmp.width)).toInt()
+            Bitmap.createScaledBitmap(bmp, maxWidth, newH, true)
+        } else bmp
+
+        val outDir = File(appContext.getExternalFilesDir(null), "drone_human_frames").apply { mkdirs() }
+        val f = File(outDir, "HUMAN_${System.currentTimeMillis()}.jpg")
+
+        FileOutputStream(f).use { os ->
+            scaled.compress(Bitmap.CompressFormat.JPEG, jpegQuality.coerceIn(30, 95), os)
+        }
+        return f
+    }
+
     override fun startLiveFramePush(
         uploadUrl: String,
         fps: Int,
@@ -383,7 +423,6 @@ class DefaultMediaFacade(
                 }
 
                 val mgr = MediaDataCenter.getInstance().cameraStreamManager
-                // helps ensure frames arrive quickly even if no UI surface
                 mgr.setKeepAliveDecoding(true)
 
                 val minIntervalMs = (1000L / fps.toLong()).coerceAtLeast(50L)
@@ -408,29 +447,39 @@ class DefaultMediaFacade(
 
                         val now = System.currentTimeMillis()
 
-                        // throttle FPS
                         if (now - session.lastSentAtMs < session.minIntervalMs) return
-
-                        // simple backpressure: skip if previous upload still inflight
                         if (session.inflight) return
 
                         session.lastSentAtMs = now
                         session.inflight = true
 
-                        // Do heavy work + network on IO executor (not DJI callback thread)
                         io.execute {
                             try {
-                                if (session.stop.get()) return@execute
+                                if (session.stop.get()) {
+                                    session.inflight = false
+                                    return@execute
+                                }
 
-                                val jpg = rgba8888ToJpegFile(
+                                // Build HumanAnalyzer endpoint
+                                val base = session.uploadUrl.trimEnd('/')
+                                val endpoint =
+                                    if (base.contains("/v1/human/frames")) base
+                                    else "$base/v1/human/frames"
+
+                                // TODO: replace with your actual device id source
+                                val deviceId = "android-controller-01"
+                                val urlWithParams = "$endpoint?device_id=$deviceId&ts_ms=$now"
+
+                                // Downscale + JPEG
+                                val jpg = rgba8888ToDownscaledJpegFile(
                                     frameData = frameData,
                                     offset = offset,
                                     width = width,
                                     height = height,
-                                    jpegQuality = session.jpegQuality
+                                    jpegQuality = session.jpegQuality,
+                                    maxWidth = 640
                                 )
 
-                                // Add optional headers for ordering / metadata
                                 val headers = mutableMapOf<String, String>()
                                 if (!controllerApiKey.isNullOrBlank()) headers["X-API-Key"] = controllerApiKey
                                 headers["X-Frame-Width"] = width.toString()
@@ -438,20 +487,19 @@ class DefaultMediaFacade(
                                 headers["X-Frame-Ts"] = now.toString()
 
                                 MultipartUploader.uploadFileAsync(
-                                    uploadUrl = session.uploadUrl,
+                                    uploadUrl = urlWithParams,
                                     file = jpg,
                                     headers = headers
                                 ) { ok, err ->
-                                    // delete temp frame to avoid storage blowup
                                     try { jpg.delete() } catch (_: Throwable) {}
                                     session.inflight = false
                                     if (!ok) {
-                                        DjiTrace.w("[LIVE_FRAMES] upload failed err=$err")
+                                        DjiTrace.w("[HUMAN_FRAMES] upload failed err=$err")
                                     }
                                 }
                             } catch (t: Throwable) {
                                 session.inflight = false
-                                DjiTrace.e("[LIVE_FRAMES] frame processing/upload crashed: ${t.message}", t)
+                                DjiTrace.e("[HUMAN_FRAMES] frame processing/upload crashed: ${t.message}", t)
                             }
                         }
                     }
@@ -468,10 +516,10 @@ class DefaultMediaFacade(
                 liveFramePusher = session
                 mgr.addFrameListener(cameraIndex, ICameraStreamManager.FrameFormat.RGBA_8888, listener)
 
-                DjiTrace.i("[LIVE_FRAMES] started uploadUrl=$uploadUrl fps=$fps cameraIndex=$cameraIndex")
+                DjiTrace.i("[HUMAN_FRAMES] started baseUrlOrEndpoint=$uploadUrl fps=$fps cameraIndex=$cameraIndex")
                 cb(true, null)
             } catch (t: Throwable) {
-                DjiTrace.e("[LIVE_FRAMES] start crashed err=$t", t)
+                DjiTrace.e("[HUMAN_FRAMES] start crashed err=$t", t)
                 cb(false, t.toString())
             }
         }
