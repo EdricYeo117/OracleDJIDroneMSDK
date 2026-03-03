@@ -53,6 +53,7 @@ interface MediaFacade {
     /** Stop raw stream recording and upload the locally recorded file */
     fun stopVideoRecordingAndUpload(uploadUrl: String, cb: (Boolean, String?) -> Unit)
 
+    /** Start uploading frames (JPEG) */
     fun startLiveFramesUpload(
         uploadUrl: String,
         fps: Int = 5,
@@ -61,28 +62,18 @@ interface MediaFacade {
         cb: (Boolean, String?) -> Unit
     )
 
+    /** Stop uploading frames */
     fun stopLiveFramesUpload(cb: (Boolean, String?) -> Unit)
 
-    /** Continuously push stream frames (JPEG) to server for CV (human_analyser) */
-    fun startLiveFramePush(
-        uploadUrl: String,
-        fps: Int = 5,
-        cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
-        jpegQuality: Int = 75,
-        cb: (Boolean, String?) -> Unit
-    )
-
-    /** Stop continuous frame push */
-    fun stopLiveFramePush(cb: (Boolean, String?) -> Unit)
-
-    /** Push live stream to an RTMP ingest server (server receives the stream) */
+    /** Push live stream to an RTMP ingest server */
     fun startRtmpLiveStreamAndAwait(
         rtmpUrl: String,
         cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
         timeoutMs: Long = 15_000,
         cb: (Boolean, String?) -> Unit
     )
-    /** Stop any active live stream (RTMP/RTSP/etc.) */
+
+    /** Stop any active live stream */
     fun stopLiveStream(cb: (Boolean, String?) -> Unit)
 }
 
@@ -98,6 +89,7 @@ class DefaultMediaFacade(
     private val io = Executors.newSingleThreadExecutor()
     @Volatile private var rawVideoRecorder: RawVideoRecorderSession? = null
 
+    @Volatile private var liveGen: Long = 0L
     private data class RawVideoRecorderSession(
         val cameraIndex: ComponentIndexType,
         val listener: ICameraStreamManager.ReceiveStreamListener,
@@ -106,19 +98,6 @@ class DefaultMediaFacade(
         val mime: AtomicReference<ICameraStreamManager.MimeType?> = AtomicReference(null),
         val bytesWritten: AtomicLong = AtomicLong(0L),
         val lock: Any = Any()
-    )
-
-    @Volatile private var liveFramePusher: LiveFramePusherSession? = null
-
-    private data class LiveFramePusherSession(
-        val cameraIndex: ComponentIndexType,
-        val listener: ICameraStreamManager.CameraFrameListener,
-        val uploadUrl: String,
-        val minIntervalMs: Long,
-        val jpegQuality: Int,
-        @Volatile var lastSentAtMs: Long = 0L,
-        @Volatile var inflight: Boolean = false,
-        val stop: AtomicBoolean = AtomicBoolean(false)
     )
 
     // -------------------------
@@ -390,146 +369,6 @@ class DefaultMediaFacade(
         return f
     }
 
-    override fun startLiveFramePush(
-        uploadUrl: String,
-        fps: Int,
-        cameraIndex: ComponentIndexType,
-        jpegQuality: Int,
-        cb: (Boolean, String?) -> Unit
-    ) {
-        io.execute {
-            try {
-                if (liveFramePusher != null) {
-                    cb(false, "Live frame push already active")
-                    return@execute
-                }
-                if (fps <= 0) {
-                    cb(false, "fps must be > 0")
-                    return@execute
-                }
-
-                val mgr = MediaDataCenter.getInstance().cameraStreamManager
-                mgr.setKeepAliveDecoding(true)
-
-                val minIntervalMs = (1000L / fps.toLong()).coerceAtLeast(50L)
-
-                lateinit var session: LiveFramePusherSession
-
-                val listener = object : ICameraStreamManager.CameraFrameListener {
-                    override fun onFrame(
-                        frameData: ByteArray,
-                        offset: Int,
-                        length: Int,
-                        width: Int,
-                        height: Int,
-                        format: ICameraStreamManager.FrameFormat
-                    ) {
-                        if (session.stop.get()) return
-                        if (format != ICameraStreamManager.FrameFormat.RGBA_8888) return
-
-                        val expected = width * height * 4
-                        if (length < expected) return
-
-                        val now = System.currentTimeMillis()
-
-                        if (now - session.lastSentAtMs < session.minIntervalMs) return
-                        if (session.inflight) return
-
-                        session.lastSentAtMs = now
-                        session.inflight = true
-
-                        io.execute {
-                            try {
-                                if (session.stop.get()) {
-                                    session.inflight = false
-                                    return@execute
-                                }
-
-                                // Build HumanAnalyzer endpoint
-                                val base = session.uploadUrl.trimEnd('/')
-                                val endpoint =
-                                    if (base.contains("/v1/human/frames")) base
-                                    else "$base/v1/human/frames"
-
-                                // TODO: replace with your actual device id source
-                                val deviceId = "android-controller-01"
-                                val urlWithParams = "$endpoint?device_id=$deviceId&ts_ms=$now"
-
-                                // Downscale + JPEG
-                                val jpg = rgba8888ToDownscaledJpegFile(
-                                    frameData = frameData,
-                                    offset = offset,
-                                    width = width,
-                                    height = height,
-                                    jpegQuality = session.jpegQuality,
-                                    maxWidth = 640
-                                )
-
-                                val headers = mutableMapOf<String, String>()
-                                if (!controllerApiKey.isNullOrBlank()) headers["X-API-Key"] = controllerApiKey
-                                headers["X-Frame-Width"] = width.toString()
-                                headers["X-Frame-Height"] = height.toString()
-                                headers["X-Frame-Ts"] = now.toString()
-
-                                MultipartUploader.uploadFileAsync(
-                                    uploadUrl = urlWithParams,
-                                    file = jpg,
-                                    headers = headers
-                                ) { ok, err ->
-                                    try { jpg.delete() } catch (_: Throwable) {}
-                                    session.inflight = false
-                                    if (!ok) {
-                                        DjiTrace.w("[HUMAN_FRAMES] upload failed err=$err")
-                                    }
-                                }
-                            } catch (t: Throwable) {
-                                session.inflight = false
-                                DjiTrace.e("[HUMAN_FRAMES] frame processing/upload crashed: ${t.message}", t)
-                            }
-                        }
-                    }
-                }
-
-                session = LiveFramePusherSession(
-                    cameraIndex = cameraIndex,
-                    listener = listener,
-                    uploadUrl = uploadUrl,
-                    minIntervalMs = minIntervalMs,
-                    jpegQuality = jpegQuality
-                )
-
-                liveFramePusher = session
-                mgr.addFrameListener(cameraIndex, ICameraStreamManager.FrameFormat.RGBA_8888, listener)
-
-                DjiTrace.i("[HUMAN_FRAMES] started baseUrlOrEndpoint=$uploadUrl fps=$fps cameraIndex=$cameraIndex")
-                cb(true, null)
-            } catch (t: Throwable) {
-                DjiTrace.e("[HUMAN_FRAMES] start crashed err=$t", t)
-                cb(false, t.toString())
-            }
-        }
-    }
-
-    override fun stopLiveFramePush(cb: (Boolean, String?) -> Unit) {
-        io.execute {
-            try {
-                val session = liveFramePusher ?: run {
-                    cb(false, "No active live frame push session")
-                    return@execute
-                }
-                session.stop.set(true)
-
-                val mgr = MediaDataCenter.getInstance().cameraStreamManager
-                try { mgr.removeFrameListener(session.listener) } catch (_: Throwable) {}
-
-                liveFramePusher = null
-                DjiTrace.i("[LIVE_FRAMES] stopped")
-                cb(true, null)
-            } catch (t: Throwable) {
-                cb(false, t.toString())
-            }
-        }
-    }
     // -------------------------
     // Upload helper
     // -------------------------
@@ -574,6 +413,10 @@ class DefaultMediaFacade(
 
                 val minIntervalMs = (1000L / fps.toLong()).coerceAtLeast(80L)
 
+                // Start a new generation; used to invalidate queued work after STOP
+                liveGen += 1L
+                val myGen = liveGen
+
                 liveFramesRunning.set(true)
                 liveInflight.set(false)
                 liveLastSentMs = 0L
@@ -587,7 +430,7 @@ class DefaultMediaFacade(
                         height: Int,
                         format: ICameraStreamManager.FrameFormat
                     ) {
-                        if (!liveFramesRunning.get()) return
+                        if (!liveFramesRunning.get() || myGen != liveGen) return
                         if (format != ICameraStreamManager.FrameFormat.RGBA_8888) return
 
                         val expected = width * height * 4
@@ -604,7 +447,8 @@ class DefaultMediaFacade(
                         // Do compression + upload off DJI callback thread
                         io.execute {
                             try {
-                                if (!liveFramesRunning.get()) {
+                                // STOP safety: bail out immediately if stopped / generation changed
+                                if (!liveFramesRunning.get() || myGen != liveGen) {
                                     liveInflight.set(false)
                                     return@execute
                                 }
@@ -617,7 +461,13 @@ class DefaultMediaFacade(
                                     jpegQuality = jpegQuality
                                 )
 
-                                // optional metadata headers for server-side debug
+                                // STOP safety again (in case STOP occurred during compression)
+                                if (!liveFramesRunning.get() || myGen != liveGen) {
+                                    try { jpgFile.delete() } catch (_: Throwable) {}
+                                    liveInflight.set(false)
+                                    return@execute
+                                }
+
                                 val headers = mutableMapOf<String, String>()
                                 if (!controllerApiKey.isNullOrBlank()) headers["X-API-Key"] = controllerApiKey
                                 headers["X-Frame-Width"] = width.toString()
@@ -631,8 +481,13 @@ class DefaultMediaFacade(
                                     file = jpgFile,
                                     headers = headers
                                 ) { ok, err ->
-                                    if (!ok) DjiTrace.w("[LIVE_FRAMES] upload failed err=$err")
-                                    else DjiTrace.i("[LIVE_FRAMES] upload ok bytes=${jpgFile.length()}")
+                                    // If STOP occurred, don't keep logging "upload ok/failed" forever
+                                    val stopped = (!liveFramesRunning.get() || myGen != liveGen)
+
+                                    if (!stopped) {
+                                        if (!ok) DjiTrace.w("[LIVE_FRAMES] upload failed err=$err")
+                                        else DjiTrace.i("[LIVE_FRAMES] upload ok bytes=${jpgFile.length()}")
+                                    }
 
                                     try { jpgFile.delete() } catch (_: Throwable) {}
                                     liveInflight.set(false)
@@ -663,13 +518,20 @@ class DefaultMediaFacade(
         io.execute {
             try {
                 val mgr = MediaDataCenter.getInstance().cameraStreamManager
+
+                // Stop + invalidate any queued work immediately
                 liveFramesRunning.set(false)
+                liveGen += 1L
 
                 liveFrameListener?.let { l ->
                     try { mgr.removeFrameListener(l) } catch (_: Throwable) {}
                 }
                 liveFrameListener = null
+
+                // Allow new sessions to start cleanly
                 liveInflight.set(false)
+                liveLastSentMs = 0L
+
                 cb(true, null)
             } catch (t: Throwable) {
                 cb(false, t.toString())

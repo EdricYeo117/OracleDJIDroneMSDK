@@ -170,22 +170,6 @@ object DroneCommandBridge {
         }
     }
 
-    fun startLiveFramePush(uploadUrl: String, fps: Int = 5, cb: (Boolean, String?) -> Unit) {
-        val m = media ?: return cb(false, "MediaFacade not bound")
-        mediaIo.execute {
-            try { m.startLiveFramePush(uploadUrl = uploadUrl, fps = fps, cb = cb) }
-            catch (t: Throwable) { cb(false, t.message ?: "startLiveFramePush failed") }
-        }
-    }
-
-    fun stopLiveFramePush(cb: (Boolean, String?) -> Unit) {
-        val m = media ?: return cb(false, "MediaFacade not bound")
-        mediaIo.execute {
-            try { m.stopLiveFramePush(cb) }
-            catch (t: Throwable) { cb(false, t.message ?: "stopLiveFramePush failed") }
-        }
-    }
-
     fun startLiveFramesUpload(uploadUrl: String, fps: Int = 5, cb: (Boolean, String?) -> Unit) {
         val m = media ?: return cb(false, "MediaFacade not bound")
         mediaIo.execute {

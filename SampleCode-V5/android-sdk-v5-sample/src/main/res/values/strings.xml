@@ -496,13 +496,13 @@ More refer to the release notes." </string>
     <string name="btn_install_test_app">Install Test App</string>
 
     <!-- Strings for HTTP server -->
-    <string name="red_host_default">192.168.1.45</string>
+    <string name="red_host_default">192.168.1.49</string>
     <string name="red_port_default">8080</string>
     <string name="red_upload_path_default">/upload</string>
     <string name="red_scheme_default">http</string>
     <string name="controller_api_key_default">edricyeo117</string>
 
     <!-- Optional full URL -->
-    <string name="red_upload_url_default">http://192.168.1.45:8080/upload</string>
+    <string name="red_upload_url_default">http://192.168.1.49:8080/upload</string>
 
 </resources>
